@@ -154,3 +154,27 @@ def test_a_zero_completion_does_not_drag_the_estimate_down() -> None:
     before = budget.completion_estimate()
     budget.observe_completion(0)
     assert budget.completion_estimate() == before
+
+
+def test_a_daily_quota_is_not_retried() -> None:
+    """A per-minute breach clears in under a minute; a daily one does not.
+
+    Retrying a daily limit burns the run's time and tells the operator nothing.
+    The two look identical in the status code and differ only in the message,
+    which is how an entire afternoon of stalls got misdiagnosed as a
+    per-minute problem.
+    """
+    from app.llm.client import _is_daily_quota, _quota_detail
+
+    daily = Exception(
+        "Error code: 429 - Rate limit reached for model X on tokens per day "
+        "(TPD): Limit 200000, Used 198333, Requested 1987."
+    )
+    per_minute = Exception(
+        "Error code: 429 - Rate limit reached for model X on tokens per minute "
+        "(TPM): Limit 8000, Used 7221, Requested 3215."
+    )
+
+    assert _is_daily_quota(daily)
+    assert not _is_daily_quota(per_minute)
+    assert _quota_detail(daily) == "limit 200,000, used 198,333"

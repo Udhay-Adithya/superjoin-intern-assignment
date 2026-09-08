@@ -28,6 +28,7 @@ from __future__ import annotations
 import hashlib
 import json
 import random
+import re
 import threading
 import time
 from collections import deque
@@ -54,6 +55,16 @@ DEFAULT_COMPLETION_ESTIMATE = 2500
 
 class LLMError(RuntimeError):
     """Raised when a completion could not be obtained or parsed."""
+
+
+class DailyQuotaExhausted(LLMError):
+    """The account's daily token allowance is gone.
+
+    Distinguished from a per-minute limit because the remedy is different:
+    a per-minute breach clears in under a minute and is worth waiting for,
+    while a daily one will not clear during the run. Retrying it burns time
+    and tells the operator nothing.
+    """
 
 
 class TokenBudget:
@@ -257,12 +268,14 @@ class LLMClient:
             try:
                 response = self._client.chat.completions.create(**kwargs)
             except (RateLimitError, APIConnectionError) as exc:
-                # A rejected request spends no tokens, so its reservation must
-                # go back. Holding it for the full window meant each retry ate
-                # budget it never used, and a few rejections in a row starved
-                # the limiter into waiting minutes for capacity that was
-                # already free.
                 self._budget.release(reservation)
+                if _is_daily_quota(exc):
+                    raise DailyQuotaExhausted(
+                        f"{model}: daily token quota exhausted -- "
+                        f"{_quota_detail(exc)}. Waiting will not help within this "
+                        f"run; use another key or resume tomorrow. Work already "
+                        f"done is cached and will not be repeated."
+                    ) from exc
                 last_error = exc
                 self._backoff(attempt, exc)
                 continue
@@ -420,6 +433,22 @@ def _drop_unsupported(kwargs: dict[str, Any], message: str) -> bool:
             kwargs.pop(param)
             return True
     return False
+
+
+_DAILY_MARKERS = ("tokens per day", "tpd", "requests per day", "rpd")
+
+
+def _is_daily_quota(exc: Exception) -> bool:
+    message = str(exc).lower()
+    return any(marker in message for marker in _DAILY_MARKERS)
+
+
+def _quota_detail(exc: Exception) -> str:
+    """Pull the useful numbers out of a provider's rate-limit message."""
+    match = re.search(r"Limit (\d+), Used (\d+)", str(exc))
+    if match:
+        return f"limit {int(match.group(1)):,}, used {int(match.group(2)):,}"
+    return "limit reached"
 
 
 def _estimate_tokens(
