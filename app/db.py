@@ -39,7 +39,7 @@ def insert(conn: sqlite3.Connection, table: str, **values: Any) -> int:
     cols = ", ".join(values)
     placeholders = ", ".join("?" for _ in values)
     cur = conn.execute(
-        f"INSERT INTO {table} ({cols}) VALUES ({placeholders})",  # noqa: S608 - fixed call sites
+        f"INSERT INTO {table} ({cols}) VALUES ({placeholders})",
         tuple(values.values()),
     )
     return int(cur.lastrowid)

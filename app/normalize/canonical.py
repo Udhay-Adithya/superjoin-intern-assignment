@@ -96,7 +96,7 @@ class Registry:
             return None
 
         row = self._conn.execute(
-            f"SELECT id, canonical_name, aliases_json FROM {self._table} "  # noqa: S608
+            f"SELECT id, canonical_name, aliases_json FROM {self._table} "
             "WHERE canonical_name = ?",
             (canonical,),
         ).fetchone()
@@ -108,7 +108,7 @@ class Registry:
         columns = ["canonical_name", "aliases_json", *defaults]
         placeholders = ", ".join("?" for _ in columns)
         cursor = self._conn.execute(
-            f"INSERT INTO {self._table} ({', '.join(columns)}) "  # noqa: S608
+            f"INSERT INTO {self._table} ({', '.join(columns)}) "
             f"VALUES ({placeholders})",
             (canonical, _dump_aliases([surface]), *defaults.values()),
         )
@@ -119,7 +119,7 @@ class Registry:
         if surface and surface not in aliases:
             aliases.append(surface)
             self._conn.execute(
-                f"UPDATE {self._table} SET aliases_json = ? WHERE id = ?",  # noqa: S608
+                f"UPDATE {self._table} SET aliases_json = ? WHERE id = ?",
                 (_dump_aliases(aliases), row_id),
             )
 

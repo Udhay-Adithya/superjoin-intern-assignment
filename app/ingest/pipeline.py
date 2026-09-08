@@ -18,7 +18,7 @@ from app import config, db
 from app.extract.extractor import UNUSABLE_REASONS, extract_region
 from app.ingest.metadata import DocumentMetadata, extract_metadata
 from app.ingest.parse import ParsedDoc, bboxes_for_span, parse_pdf
-from app.ingest.segment import Region, segment_document, _numeric_token_count
+from app.ingest.segment import Region, _numeric_token_count, segment_document
 from app.llm.client import LLMClient, map_concurrent
 from app.normalize.facts import NormalizationError, normalize_candidate, scale_multiplier
 from app.normalize.periods import Period
@@ -350,7 +350,7 @@ def reconcile_keys(conn: sqlite3.Connection, core_keys: set[str]) -> int:
         ids = [f.id for f in facts]
         placeholders = ",".join("?" for _ in ids)
         conn.execute(
-            f"DELETE FROM relations WHERE fact_a IN ({placeholders}) "  # noqa: S608
+            f"DELETE FROM relations WHERE fact_a IN ({placeholders}) "
             f"AND fact_b IN ({placeholders})",
             (*ids, *ids),
         )

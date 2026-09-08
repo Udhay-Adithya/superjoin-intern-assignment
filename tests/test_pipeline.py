@@ -17,7 +17,7 @@ import pytest
 
 from app import db
 from app.ingest.pipeline import ingest_document, load_cluster, reconcile_keys
-from app.reason.compare import CONTRADICTS, CORROBORATES, RECONCILED
+from app.reason.compare import CORROBORATES, RECONCILED
 
 ANNUAL_REPORT = Path("starter-datasets/delhivery/02-delhivery-annual-report-fy24-excerpt.pdf")
 
@@ -131,10 +131,6 @@ def test_pipeline_produces_grounded_facts(conn, report_path) -> None:
     rows = conn.execute(
         "SELECT quote, char_start, char_end, page_no FROM facts LIMIT 20"
     ).fetchall()
-    pages = {
-        r["page_no"]: r["text"]
-        for r in conn.execute("SELECT page_no, text FROM pages").fetchall()
-    }
     for row in rows:
         assert row["quote"], "a stored fact has no evidence"
         assert row["char_end"] > row["char_start"], "evidence span is empty"

@@ -16,9 +16,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from app import config, db  # noqa: E402
-from app.ingest.pipeline import ingest_document, reconcile_all  # noqa: E402
-from app.llm.client import LLMClient  # noqa: E402
+from app import config, db
+from app.ingest.pipeline import ingest_document, reconcile_all
+from app.llm.client import LLMClient
 
 
 def main() -> int:

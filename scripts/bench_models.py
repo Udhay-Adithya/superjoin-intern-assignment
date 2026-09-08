@@ -23,11 +23,11 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from openai import OpenAI  # noqa: E402
+from openai import OpenAI
 
-from app import config  # noqa: E402
-from app.ingest.parse import parse_pdf  # noqa: E402
-from app.ingest.segment import segment_page  # noqa: E402
+from app import config
+from app.ingest.parse import parse_pdf
+from app.ingest.segment import segment_page
 
 CANDIDATES = [
     "nvidia/nemotron-3.5-lightning-30b-a3b",

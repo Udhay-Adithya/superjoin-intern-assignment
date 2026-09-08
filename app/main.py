@@ -268,7 +268,7 @@ def list_conflicts(
     try:
         relations = _rows(
             conn.execute(
-                f"SELECT r.* FROM relations r{where} "  # noqa: S608 - fixed clauses
+                f"SELECT r.* FROM relations r{where} "
                 "ORDER BY CASE r.verdict WHEN 'contradicts' THEN 0 "
                 "WHEN 'reconciled' THEN 1 ELSE 2 END, r.id DESC LIMIT ?",
                 [*params, limit],
@@ -337,7 +337,7 @@ def get_cluster(core_key: str) -> dict:
 def stats() -> dict:
     conn = get_conn()
     try:
-        one = lambda sql: conn.execute(sql).fetchone()[0]  # noqa: E731
+        one = lambda sql: conn.execute(sql).fetchone()[0]
         verdicts = {
             row["verdict"]: row["n"]
             for row in conn.execute(

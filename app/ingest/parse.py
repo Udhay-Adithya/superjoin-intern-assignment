@@ -155,7 +155,7 @@ def _layout_words(
         buffer = ""
         for w in line:
             x0, y0, x1, y1, text = w[0], w[1], w[2], w[3], w[4]
-            column = int(round((x0 - left_margin) / char_width))
+            column = round((x0 - left_margin) / char_width)
             if column > len(buffer):
                 buffer += " " * (column - len(buffer))
             elif buffer:

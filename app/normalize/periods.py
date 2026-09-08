@@ -112,14 +112,14 @@ def calendar_quarter(year: int, quarter: int) -> tuple[date, date]:
 # conventions must come first.
 _PATTERNS: list[tuple[re.Pattern[str], str]] = [
     # Q4 FY24 / Q4FY2024 / Q4 FY 24
-    (re.compile(r"\bQ([1-4])\s*[-,]?\s*FY\s*'?(\d{2,4})\b", re.I), "fiscal_quarter"),
+    (re.compile(r"\bQ([1-4])\s*[-,]?\s*FY\s*'?(\d{2,4})\b", re.IGNORECASE), "fiscal_quarter"),
     # H1 FY25
-    (re.compile(r"\bH([12])\s*[-,]?\s*FY\s*'?(\d{2,4})\b", re.I), "fiscal_half"),
+    (re.compile(r"\bH([12])\s*[-,]?\s*FY\s*'?(\d{2,4})\b", re.IGNORECASE), "fiscal_half"),
     # FY2023-24 / FY 2023-24 / FY2025/26 / FY23-24
-    (re.compile(r"\bFY\s*'?(\d{4})\s*[-/]\s*(\d{2,4})\b", re.I), "fiscal_span"),
-    (re.compile(r"\bFY\s*'?(\d{2})\s*[-/]\s*(\d{2})\b", re.I), "fiscal_span_short"),
+    (re.compile(r"\bFY\s*'?(\d{4})\s*[-/]\s*(\d{2,4})\b", re.IGNORECASE), "fiscal_span"),
+    (re.compile(r"\bFY\s*'?(\d{2})\s*[-/]\s*(\d{2})\b", re.IGNORECASE), "fiscal_span_short"),
     # FY24 / FY 2024 / FY'24
-    (re.compile(r"\bFY\s*'?(\d{2,4})\b", re.I), "fiscal_year"),
+    (re.compile(r"\bFY\s*'?(\d{2,4})\b", re.IGNORECASE), "fiscal_year"),
     # "FY ended March 31, 2024" -- the annual report's column header -- plus the
     # spelled-out variants. FY must be listed here or it falls through to the
     # bare-date matcher and collapses a whole year into a single instant.
@@ -127,12 +127,12 @@ _PATTERNS: list[tuple[re.Pattern[str], str]] = [
         re.compile(
             r"\b(?:FY|financial\s+year|fiscal\s+year|year|period)\s+end(?:ed|ing)\s+"
             r"(\w+)\s+(\d{1,2}),?\s*(\d{4})",
-            re.I,
+            re.IGNORECASE,
         ),
         "year_ended",
     ),
     # as at / as of March 31, 2024
-    (re.compile(r"\bas\s+(?:at|of)\s+(\w+)\s+(\d{1,2}),?\s*(\d{4})", re.I), "instant"),
+    (re.compile(r"\bas\s+(?:at|of)\s+(\w+)\s+(\d{1,2}),?\s*(\d{4})", re.IGNORECASE), "instant"),
     # 2025Q2 / 2025:Q2 / 2025 Q2  (calendar quarter -- the IMF convention)
     (re.compile(r"\b(\d{4})\s*[:\-]?\s*Q([1-4])\b"), "calendar_quarter"),
     # Q2 2025 (calendar quarter, written the other way round)

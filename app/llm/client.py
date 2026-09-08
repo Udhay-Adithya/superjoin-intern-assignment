@@ -34,14 +34,11 @@ from collections import deque
 from collections.abc import Callable, Iterable, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
-from typing import Any, TypeVar
+from typing import Any
 
 from openai import APIConnectionError, APIStatusError, OpenAI, RateLimitError
 
 from app import config
-
-T = TypeVar("T")
-R = TypeVar("R")
 
 DEFAULT_MAX_TOKENS = 8000
 RETRY_MAX_TOKENS = 16000
@@ -271,7 +268,7 @@ class LLMClient:
 
     @staticmethod
     def _backoff(attempt: int) -> None:
-        time.sleep(min(2**attempt + random.random(), 30.0))  # noqa: S311 - jitter, not crypto
+        time.sleep(min(2**attempt + random.random(), 30.0))
 
     # --- structured output ------------------------------------------------
 
@@ -374,8 +371,7 @@ def _loads(text: str) -> Any:
         parts = stripped.split("```")
         if len(parts) > 1:
             stripped = parts[1]
-            if stripped.startswith("json"):
-                stripped = stripped[4:]
+            stripped = stripped.removeprefix("json")
             stripped = stripped.strip()
 
     try:
@@ -395,7 +391,7 @@ def _loads(text: str) -> Any:
     raise json.JSONDecodeError("no json object or array found", stripped, 0)
 
 
-def map_concurrent(
+def map_concurrent[T, R](
     fn: Callable[[T], R], items: Iterable[T], *, workers: int = 8
 ) -> list[R]:
     """Run ``fn`` over ``items`` in parallel, preserving input order.

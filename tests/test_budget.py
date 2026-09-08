@@ -52,7 +52,7 @@ def test_over_budget_request_waits_then_proceeds() -> None:
     assert not done.wait(timeout=0.5), "an over-budget request was admitted immediately"
 
     # Settling the first request down to a smaller real cost frees capacity.
-    budget._window[0][1] = 50.0  # noqa: SLF001 - exercising the window directly
+    budget._window[0][1] = 50.0
     assert done.wait(timeout=5), "capacity freed but the waiter was never admitted"
 
 
