@@ -70,9 +70,13 @@ class LLMClient:
         cache_enabled: bool | None = None,
     ) -> None:
         self._client = OpenAI(
-            api_key=api_key or config.NIM_API_KEY,
-            base_url=base_url or config.NIM_BASE_URL,
+            api_key=api_key or config.LLM_API_KEY,
+            base_url=base_url or config.LLM_BASE_URL,
             timeout=REQUEST_TIMEOUT,
+            # This class does its own retrying with backoff; the SDK's default
+            # of 2 silently multiplies every timeout by three and makes a slow
+            # endpoint look like a hung one.
+            max_retries=0,
         )
         self._cache_enabled = (
             config.LLM_CACHE_ENABLED if cache_enabled is None else cache_enabled
@@ -138,6 +142,10 @@ class LLMClient:
         }
         if response_format is not None:
             kwargs["response_format"] = response_format
+        if config.REASONING_EFFORT:
+            # Not every provider accepts this; an unsupported value is dropped
+            # below rather than failing the request.
+            kwargs["reasoning_effort"] = config.REASONING_EFFORT
 
         last_error: Exception | None = None
         for attempt in range(MAX_ATTEMPTS):
@@ -151,6 +159,10 @@ class LLMClient:
                 if exc.status_code >= 500:
                     last_error = exc
                     self._backoff(attempt)
+                    continue
+                # Providers reject parameters they do not implement. Drop the
+                # optional ones and retry rather than failing the whole run.
+                if exc.status_code == 400 and _drop_unsupported(kwargs, str(exc)):
                     continue
                 raise LLMError(f"{model}: {exc.status_code} {str(exc)[:200]}") from exc
 
@@ -239,6 +251,27 @@ class LLMClient:
             return _loads(completion.text)
         except json.JSONDecodeError as exc:
             raise LLMError(f"{model}: unparseable JSON after repair ({exc})") from exc
+
+
+# Optional request parameters, in the order they are given up when a provider
+# rejects them. Structured output is surrendered last because losing it costs
+# the most.
+_OPTIONAL_PARAMS = ("reasoning_effort", "response_format")
+
+
+def _drop_unsupported(kwargs: dict[str, Any], message: str) -> bool:
+    """Remove one rejected optional parameter. True if something was dropped."""
+    lowered = message.lower()
+    for param in _OPTIONAL_PARAMS:
+        if param in kwargs and param in lowered:
+            kwargs.pop(param)
+            return True
+    # The error did not name a parameter; drop the least essential one present.
+    for param in _OPTIONAL_PARAMS:
+        if param in kwargs:
+            kwargs.pop(param)
+            return True
+    return False
 
 
 def _loads(text: str) -> dict:

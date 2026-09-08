@@ -31,7 +31,12 @@ BACKTRACK_TOLERANCE = 1.2
 # actually related -- these pages are two-page spreads.
 MAX_WIDTH_RATIO = 0.60
 
-MAX_REGION_CHARS = 6000
+# Extraction output scales with how many values a region contains, and reasoning
+# models spend their whole token budget before answering if a region is too
+# dense. 2500 keeps a financial table together with its caption and headers --
+# the invariant that matters -- without also absorbing the narrative that
+# follows it.
+MAX_REGION_CHARS = 2500
 
 KIND_TABLE = "table"
 KIND_HEADING = "heading"

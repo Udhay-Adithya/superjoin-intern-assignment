@@ -32,29 +32,38 @@ def test_layout_preserves_table_columns(annual_report: ParsedDoc) -> None:
         assert figure in row, f"{figure} left the revenue row"
 
 
-def test_region_keeps_a_figure_with_its_qualifiers(annual_report: ParsedDoc) -> None:
+def test_every_region_carries_the_qualifiers_for_its_figures(
+    annual_report: ParsedDoc,
+) -> None:
     """The invariant the whole comparison engine rests on.
 
     A value is meaningless without the unit, basis and period that qualify it.
-    If segmentation ever splits them apart, Case 1 and Case 3 both break.
+    The consolidated revenue figure appears twice on this page -- once in the
+    table and once in the prose that restates it -- and *each* occurrence must
+    be extractable on its own, because the extractor sees one region at a time.
     """
     page = annual_report.pages[REVENUE_PAGE_INDEX]
     regions = [r for r in segment_page(page) if "81,415.38" in r.text]
-    assert len(regions) == 1, "the figure should live in exactly one region"
+    assert regions, "the figure disappeared from the page entirely"
 
-    region = regions[0]
-    assert region.kind == KIND_TABLE
-    assert "₹ in Million" in region.text, "unit caption was separated from the value"
-    assert "Standalone" in region.text, "basis qualifier was separated from the value"
-    assert "Consolidated" in region.text, "basis qualifier was separated from the value"
-    assert "March 31, 2024" in region.text, "period header was separated from the value"
+    for region in regions:
+        text = region.text.lower()
+        assert "consolidated" in text, "basis qualifier separated from the value"
+        assert "million" in text, "unit separated from the value"
+        assert "fy24" in text or "march 31, 2024" in text, "period separated from the value"
 
 
-def test_standalone_and_consolidated_share_one_region(annual_report: ParsedDoc) -> None:
+def test_the_table_region_holds_both_bases_together(annual_report: ParsedDoc) -> None:
     """Case 3 needs both figures visible together to be explained by basis."""
     page = annual_report.pages[REVENUE_PAGE_INDEX]
-    region = next(r for r in segment_page(page) if "81,415.38" in r.text)
-    assert "74,540.82" in region.text
+    table = next(
+        r
+        for r in segment_page(page)
+        if r.kind == KIND_TABLE and "81,415.38" in r.text and "Particulars" in r.text
+    )
+    assert "74,540.82" in table.text
+    assert "Standalone" in table.text and "Consolidated" in table.text
+    assert "₹ in Million" in table.text
 
 
 def test_regions_stay_within_the_prompt_budget(annual_report: ParsedDoc) -> None:
