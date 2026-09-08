@@ -40,7 +40,7 @@ from openai import APIConnectionError, APIStatusError, OpenAI, RateLimitError
 
 from app import config
 
-DEFAULT_MAX_TOKENS = 8000
+DEFAULT_MAX_TOKENS = 4000
 RETRY_MAX_TOKENS = 16000
 MAX_ATTEMPTS = 4
 REQUEST_TIMEOUT = 600.0
@@ -110,6 +110,15 @@ class TokenBudget:
         """Replace an estimate with the real cost, once the API reports it."""
         with self._lock:
             reservation[1] = float(max(0, min(actual_tokens, self._tpm)))
+
+    def release(self, reservation: list[float]) -> None:
+        """Give back a reservation for a request that never ran.
+
+        A rejected or failed call spends nothing, so charging it against the
+        window punishes the next caller for a request the provider refused.
+        """
+        with self._lock:
+            reservation[1] = 0.0
 
 
 @dataclass
@@ -220,10 +229,17 @@ class LLMClient:
             try:
                 response = self._client.chat.completions.create(**kwargs)
             except (RateLimitError, APIConnectionError) as exc:
+                # A rejected request spends no tokens, so its reservation must
+                # go back. Holding it for the full window meant each retry ate
+                # budget it never used, and a few rejections in a row starved
+                # the limiter into waiting minutes for capacity that was
+                # already free.
+                self._budget.release(reservation)
                 last_error = exc
                 self._backoff(attempt)
                 continue
             except APIStatusError as exc:
+                self._budget.release(reservation)
                 # 413 "request too large" is how some providers report a
                 # tokens-per-minute breach. It clears with time, so it is
                 # retryable rather than fatal.
@@ -243,6 +259,8 @@ class LLMClient:
             # A reasoning model can spend the whole budget thinking and return
             # nothing. Retry once with more room before giving up.
             if not text.strip() and choice.finish_reason == "length":
+                if response.usage:
+                    self._budget.settle(reservation, response.usage.total_tokens)
                 if kwargs["max_tokens"] < RETRY_MAX_TOKENS:
                     kwargs["max_tokens"] = RETRY_MAX_TOKENS
                     continue

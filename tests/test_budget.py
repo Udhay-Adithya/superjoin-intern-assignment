@@ -87,3 +87,21 @@ def test_concurrent_workers_all_finish() -> None:
         thread.join(timeout=10)
 
     assert len(finished) == 4, f"only {len(finished)} of 4 workers completed"
+
+
+def test_a_failed_request_gives_its_reservation_back() -> None:
+    """The starvation bug that stalled a live ingest for minutes.
+
+    A rejected request spends no tokens. Holding its reservation for the whole
+    window meant a few provider rejections in a row could starve the limiter of
+    capacity that was never actually used.
+    """
+    budget = TokenBudget(tokens_per_minute=3000, requests_per_minute=1000, window_seconds=30)
+
+    for _ in range(3):
+        failed = budget.acquire(1000)
+        budget.release(failed)
+
+    started = time.monotonic()
+    budget.acquire(2500)  # would block if the failures still held their budget
+    assert time.monotonic() - started < 0.5
