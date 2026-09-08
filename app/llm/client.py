@@ -65,46 +65,54 @@ class TokenBudget:
     still costs a round trip and loses whatever the model had already generated.
     """
 
-    def __init__(self, tokens_per_minute: int, requests_per_minute: int) -> None:
+    def __init__(
+        self,
+        tokens_per_minute: int,
+        requests_per_minute: int,
+        window_seconds: float = 60.0,
+    ) -> None:
         self._tpm = max(1, tokens_per_minute)
         self._rpm = max(1, requests_per_minute)
-        self._window: deque[tuple[float, int]] = deque()
+        self._window_seconds = max(0.01, window_seconds)
+        # Entries are mutable so a caller can correct its own reservation once
+        # the true cost is known. Correcting by position instead would let one
+        # thread's overage be charged to another thread's request.
+        self._window: deque[list[float]] = deque()
         self._lock = threading.Lock()
 
     def _prune(self, now: float) -> None:
-        cutoff = now - 60.0
+        cutoff = now - self._window_seconds
         while self._window and self._window[0][0] < cutoff:
             self._window.popleft()
 
-    def acquire(self, estimated_tokens: int) -> None:
-        """Block until this request fits inside the trailing minute."""
-        estimated = max(1, min(estimated_tokens, self._tpm))
+    def acquire(self, estimated_tokens: int) -> list[float]:
+        """Block until this request fits inside the trailing minute.
+
+        Returns the caller's own reservation, to be passed back to ``settle``.
+        """
+        estimated = float(max(1, min(estimated_tokens, self._tpm)))
         while True:
             with self._lock:
                 now = time.monotonic()
                 self._prune(now)
-                used = sum(tokens for _, tokens in self._window)
+                used = sum(entry[1] for entry in self._window)
                 if used + estimated <= self._tpm and len(self._window) < self._rpm:
-                    self._window.append((now, estimated))
-                    return
+                    entry = [now, estimated]
+                    self._window.append(entry)
+                    return entry
                 oldest = self._window[0][0] if self._window else now
-                wait = 60.0 - (now - oldest)
+                wait = self._window_seconds - (now - oldest)
 
             # Poll rather than sleeping out the whole window: entries expire
             # continuously, so capacity usually frees up well before the oldest
             # one does, and several waiting threads would otherwise all sleep
             # the maximum and then wake together.
-            time.sleep(max(0.1, min(wait, 2.0)))
+            time.sleep(max(0.01, min(wait, 2.0)))
 
-    def settle(self, estimated_tokens: int, actual_tokens: int) -> None:
-        """Correct the reservation once the true cost is known."""
-        delta = actual_tokens - max(1, min(estimated_tokens, self._tpm))
-        if not delta:
-            return
+    def settle(self, reservation: list[float], actual_tokens: int) -> None:
+        """Replace an estimate with the real cost, once the API reports it."""
         with self._lock:
-            if self._window:
-                timestamp, reserved = self._window[-1]
-                self._window[-1] = (timestamp, max(0, reserved + delta))
+            reservation[1] = float(max(0, min(actual_tokens, self._tpm)))
 
 
 @dataclass
@@ -211,7 +219,7 @@ class LLMClient:
         estimated = _estimate_tokens(messages, max_tokens)
         last_error: Exception | None = None
         for attempt in range(MAX_ATTEMPTS):
-            self._budget.acquire(estimated)
+            reservation = self._budget.acquire(estimated)
             try:
                 response = self._client.chat.completions.create(**kwargs)
             except (RateLimitError, APIConnectionError) as exc:
@@ -244,7 +252,7 @@ class LLMClient:
                 raise LLMError(f"{model}: empty completion, budget exhausted by reasoning")
 
             if response.usage:
-                self._budget.settle(estimated, response.usage.total_tokens)
+                self._budget.settle(reservation, response.usage.total_tokens)
 
             payload = {
                 "text": text,
