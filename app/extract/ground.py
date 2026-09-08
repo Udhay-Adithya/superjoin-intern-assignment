@@ -49,6 +49,7 @@ class Grounded:
     quote: str  # the source text as written, not as the model rendered it
     char_start: int  # absolute offset into the document stream
     char_end: int
+    repaired: bool = False  # evidence was recovered, not quoted correctly
 
 
 def _fold(text: str) -> str:
@@ -130,6 +131,45 @@ def locate(quote: str, source: str, *, source_offset: int = 0) -> Grounded:
     )
 
 
+def _repair_from_value(value_raw: str, source: str, source_offset: int) -> Grounded:
+    """Recover evidence for a real value whose quote was badly formed.
+
+    Models routinely build a quote for a table cell by pairing the row label
+    with just that one value -- "Revenue from Operations 81,415.38" -- when the
+    row actually holds four figures in sequence. The value is genuinely in the
+    document; only the quote is synthetic.
+
+    Rather than discard a real fact, the containing line is used as the
+    evidence. The guarantee is unchanged: the evidence is still verbatim source
+    text that demonstrably contains the value. The repair is refused when the
+    value appears on more than one line, because then the evidence is ambiguous
+    and a guess would be worse than a rejection.
+    """
+    needle = _digits(value_raw)
+    if not needle:
+        raise GroundingError("quote not found in source")
+
+    matches = []
+    cursor = 0
+    for line in source.split("\n"):
+        if needle in _digits(line):
+            matches.append((cursor, cursor + len(line), line))
+        cursor += len(line) + 1
+
+    if not matches:
+        raise GroundingError("quote not found in source")
+    if len(matches) > 1:
+        raise GroundingError("evidence ambiguous: value appears on several lines")
+
+    start, end, line = matches[0]
+    return Grounded(
+        quote=line,
+        char_start=source_offset + start,
+        char_end=source_offset + end,
+        repaired=True,
+    )
+
+
 def ground_fact(
     *, quote: str, value_raw: str, source: str, source_offset: int = 0
 ) -> Grounded:
@@ -141,14 +181,30 @@ def ground_fact(
     digits ignores thousands separators and currency symbols while still
     requiring the figure itself to be present.
     """
-    located = locate(quote, source, source_offset=source_offset)
+    # An absent quote is a different failure from a wrong one: the model
+    # ignored the contract rather than misapplied it, so there is nothing to
+    # repair from.
+    if not quote or not quote.strip():
+        raise GroundingError("empty quote")
 
     value_digits = _digits(value_raw)
+
+    try:
+        located = locate(quote, source, source_offset=source_offset)
+    except GroundingError:
+        if not value_digits:
+            raise
+        # The quote is wrong, but the value may still be real. Try to recover
+        # its evidence from the source rather than lose a genuine fact.
+        return _repair_from_value(value_raw, source, source_offset)
+
     if not value_digits:
         # Non-numeric facts (a director's status, say) have nothing to check.
         return located
 
     if value_digits not in _digits(located.quote):
-        raise GroundingError(f"value {value_raw!r} not present in its own evidence quote")
+        # A real quote paired with a value that is not in it. The quote may
+        # simply be the wrong row; fall back to locating the value itself.
+        return _repair_from_value(value_raw, source, source_offset)
 
     return located

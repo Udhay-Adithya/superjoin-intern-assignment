@@ -48,14 +48,44 @@ def test_dash_variants_are_folded() -> None:
     assert "Standalone" in found.quote
 
 
-def test_value_must_appear_in_its_own_quote() -> None:
-    """The check that catches a real quote paired with an invented number."""
-    with pytest.raises(GroundingError, match="not present in its own evidence"):
+def test_invented_value_is_rejected_even_with_a_real_quote() -> None:
+    """The check that earns its keep.
+
+    A model can return a genuine sentence from the document alongside a number
+    that appears nowhere in it. The quote passes; the value must not.
+    """
+    with pytest.raises(GroundingError):
         ground_fact(
             quote="Revenue from Operations 74,540.82",
             value_raw="99,999.99",
             source=SOURCE,
         )
+
+
+def test_spliced_table_quote_is_repaired_not_discarded() -> None:
+    """Models pair a row label with one of its values and call it a quote.
+
+    "Revenue from Operations 81,415.38" does not exist in the source -- the real
+    row carries four figures. The value is genuine, so the containing line is
+    recovered as evidence and the fact is kept, flagged as repaired.
+    """
+    grounded = ground_fact(
+        quote="Revenue from Operations 81,415.38",
+        value_raw="81,415.38",
+        source=SOURCE,
+    )
+    assert grounded.repaired is True
+    assert "81,415.38" in grounded.quote
+    # The recovered evidence is real source text, not the model's rendering.
+    assert grounded.quote == SOURCE[grounded.char_start : grounded.char_end]
+    assert "74,540.82" in grounded.quote, "the whole row is the evidence"
+
+
+def test_repair_refuses_when_evidence_is_ambiguous() -> None:
+    """If a value sits on two lines, no single line is its evidence."""
+    ambiguous = "Revenue 100.00 other\nExpenses 100.00 other\n"
+    with pytest.raises(GroundingError, match="ambiguous"):
+        ground_fact(quote="nonexistent quote", value_raw="100.00", source=ambiguous)
 
 
 def test_thousands_separators_do_not_break_the_value_check() -> None:

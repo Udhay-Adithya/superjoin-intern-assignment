@@ -114,14 +114,21 @@ Rules:
 3. `basis_raw` captures scope qualifiers such as Standalone or Consolidated.
 4. `variant_raw` captures a distinction that changes what is being counted,
    such as real vs nominal, or revenue from services vs revenue from customers.
-5. `modality` says what kind of claim it is:
+5. `period_raw` must be the FULL period description, combining header rows if
+   the period is split across them. A column headed "Consolidated - FY ended"
+   above "March 31, 2024" describes the year ending on that date, so write
+   "FY ended March 31, 2024", not "March 31, 2024".
+6. `quote` MUST be copied character for character from the excerpt.
+   For a table row, quote the WHOLE line as it appears, including the other
+   values on that line and the spacing between them. Do NOT assemble a quote by
+   pairing a row label with just one of its values -- that string does not exist
+   in the document and the fact will be discarded.
+7. `modality` says what kind of claim it is:
    - "actual" for a reported outturn
    - "projected" for a forecast of a future period
    - "estimated" for a provisional or estimated figure
    - "restated" for a previously reported figure now revised
-6. `quote` MUST be an exact substring of the excerpt that contains the value.
-   Never paraphrase, never join text from different rows, never invent a quote.
-7. Extract only what is present. If the excerpt has no facts, return an empty list.
+8. Extract only what is present. If the excerpt has no facts, return an empty list.
 
 EXCERPT (from page {page_no}):
 {excerpt}"""
@@ -145,6 +152,7 @@ class CandidateFact:
     char_start: int | None = None
     char_end: int | None = None
     grounded_quote: str | None = None
+    evidence_repaired: bool = False
 
     page_no: int = 0
     region_index: int = 0
@@ -178,6 +186,11 @@ class ExtractionResult:
     def grounding_rejection_rate(self) -> float:
         total = len(self.facts) + len(self.rejected)
         return len(self.rejected) / total if total else 0.0
+
+    @property
+    def n_repaired(self) -> int:
+        """Facts kept whose evidence had to be recovered rather than quoted."""
+        return sum(1 for f in self.facts if f.evidence_repaired)
 
 
 def extract_region(
@@ -232,6 +245,7 @@ def extract_region(
         candidate.char_start = grounded.char_start
         candidate.char_end = grounded.char_end
         candidate.grounded_quote = grounded.quote
+        candidate.evidence_repaired = grounded.repaired
         result.facts.append(candidate)
 
     return result
