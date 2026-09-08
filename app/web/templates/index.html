@@ -1,0 +1,170 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Fact Knowledge Layer</title>
+<style>
+  :root {
+    --bg: #fbfbfa; --panel: #fff; --ink: #1c1b1a; --muted: #6b6864;
+    --line: #e4e1dc; --accent: #2f5d8a;
+    --ok: #2d7d54; --bad: #b03030; --mid: #9a6a1f;
+    --ok-bg: #eef7f1; --bad-bg: #fbeeee; --mid-bg: #fdf5e7;
+    --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #16161a; --panel: #1e1e24; --ink: #e9e7e3; --muted: #9a968f;
+      --line: #32323a; --accent: #7fa9d4;
+      --ok: #6bc48f; --bad: #e07a7a; --mid: #d8ac5e;
+      --ok-bg: #1b2a22; --bad-bg: #2c1d1d; --mid-bg: #2b2418;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font: 15px/1.55 system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  header.top {
+    padding: 22px 28px 0; border-bottom: 1px solid var(--line); background: var(--panel);
+  }
+  header.top h1 { margin: 0 0 2px; font-size: 20px; letter-spacing: -0.01em; }
+  header.top p { margin: 0 0 16px; color: var(--muted); font-size: 13.5px; max-width: 62ch; }
+  nav { display: flex; gap: 4px; }
+  .tab {
+    padding: 8px 14px; cursor: pointer; border: 1px solid transparent;
+    border-bottom: none; border-radius: 7px 7px 0 0; color: var(--muted); font-size: 14px;
+  }
+  .tab:hover { color: var(--ink); }
+  .tab.active {
+    background: var(--bg); border-color: var(--line); color: var(--ink);
+    font-weight: 600; margin-bottom: -1px;
+  }
+  main { padding: 24px 28px 60px; max-width: 1180px; }
+  h3 { margin: 28px 0 10px; font-size: 15px; letter-spacing: 0.01em; }
+
+  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(132px, 1fr)); gap: 10px; }
+  .tile { background: var(--panel); border: 1px solid var(--line); border-radius: 9px; padding: 13px 15px; }
+  .tile-value { font-size: 23px; font-weight: 600; font-variant-numeric: tabular-nums; }
+  .tile-label { color: var(--muted); font-size: 12px; margin-top: 2px; }
+  .tile.corroborates .tile-value { color: var(--ok); }
+  .tile.contradicts .tile-value { color: var(--bad); }
+  .tile.reconciled  .tile-value { color: var(--mid); }
+
+  table.grid { width: 100%; border-collapse: collapse; background: var(--panel);
+    border: 1px solid var(--line); border-radius: 9px; overflow: hidden; font-size: 13.5px; }
+  .grid th, .grid td { padding: 8px 11px; text-align: left; border-bottom: 1px solid var(--line); vertical-align: top; }
+  .grid th { background: var(--bg); font-weight: 600; font-size: 12px; color: var(--muted); }
+  .grid tr:last-child td { border-bottom: none; }
+  .num { text-align: right; font-variant-numeric: tabular-nums; }
+  .mono { font-family: var(--mono); }
+  .small { font-size: 12.5px; }
+  .muted { color: var(--muted); }
+
+  .relation { background: var(--panel); border: 1px solid var(--line);
+    border-left: 3px solid var(--line); border-radius: 9px; padding: 14px 16px; margin-bottom: 12px; }
+  .relation.corroborates { border-left-color: var(--ok); }
+  .relation.contradicts  { border-left-color: var(--bad); }
+  .relation.reconciled   { border-left-color: var(--mid); }
+  .relation header { display: flex; gap: 9px; align-items: center; flex-wrap: wrap; margin-bottom: 7px; }
+  .verdict { font-size: 11.5px; font-weight: 700; letter-spacing: 0.05em;
+    text-transform: uppercase; padding: 3px 8px; border-radius: 5px; }
+  .verdict.corroborates { color: var(--ok); background: var(--ok-bg); }
+  .verdict.contradicts  { color: var(--bad); background: var(--bad-bg); }
+  .verdict.reconciled   { color: var(--mid); background: var(--mid-bg); }
+  .rule { font-family: var(--mono); font-size: 12px; color: var(--muted); }
+  .badge-inferred { font-size: 11px; color: var(--mid); border: 1px solid var(--mid);
+    border-radius: 4px; padding: 1px 6px; }
+  .explanation { margin: 0 0 12px; font-size: 14px; }
+
+  .pair { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  @media (max-width: 780px) { .pair { grid-template-columns: 1fr; } }
+  .fact-card { border: 1px solid var(--line); border-radius: 8px; padding: 11px 13px; background: var(--bg); }
+  .fact-value { font-size: 18px; font-weight: 600; font-variant-numeric: tabular-nums; }
+  .unit { font-size: 12px; font-weight: 400; color: var(--muted); }
+  .fact-metric { font-size: 13.5px; margin-top: 1px; }
+  .fact-quals { margin: 7px 0 4px; display: flex; gap: 5px; flex-wrap: wrap; }
+  .qual { font-size: 11.5px; background: var(--panel); border: 1px solid var(--line);
+    border-radius: 4px; padding: 1px 7px; }
+  .fact-period { font-family: var(--mono); font-size: 11.5px; color: var(--muted); }
+  .evidence { margin: 9px 0 7px; padding: 7px 10px; border-left: 2px solid var(--line);
+    font-family: var(--mono); font-size: 11.5px; white-space: pre-wrap;
+    overflow-x: auto; max-height: 108px; color: var(--muted); }
+  .fact-source { font-size: 12px; color: var(--muted); }
+  .fact-source a { color: var(--accent); margin-left: 6px; }
+
+  .controls { display: flex; gap: 10px; align-items: center; margin-bottom: 14px; flex-wrap: wrap; }
+  input[type=search], select, input[type=file] {
+    font: inherit; font-size: 13.5px; padding: 6px 10px; border: 1px solid var(--line);
+    border-radius: 7px; background: var(--panel); color: var(--ink);
+  }
+  input[type=search] { min-width: 260px; }
+  #upload-status { font-size: 13px; color: var(--muted); }
+</style>
+</head>
+<body>
+<header class="top">
+  <h1>Fact Knowledge Layer</h1>
+  <p>
+    Facts extracted from PDFs, each tied to the text that supports it, then compared
+    across documents. Verdicts are computed from normalized values and qualifiers,
+    not asked of a language model.
+  </p>
+  <nav>
+    <div class="tab" data-tab="overview">Overview</div>
+    <div class="tab" data-tab="conflicts">Reconciliation</div>
+    <div class="tab" data-tab="facts">Facts</div>
+    <div class="tab" data-tab="clusters">Clusters</div>
+    <div class="tab" data-tab="upload">Upload</div>
+  </nav>
+</header>
+
+<main>
+  <section class="panel" data-panel="overview"><div id="overview"></div></section>
+
+  <section class="panel" data-panel="conflicts" hidden>
+    <div class="controls">
+      <select id="verdict-filter">
+        <option value="">all verdicts</option>
+        <option value="contradicts">contradicts</option>
+        <option value="reconciled">reconciled</option>
+        <option value="corroborates">corroborates</option>
+      </select>
+      <span class="muted small">Each card shows the rule that fired and both sides' evidence.</span>
+    </div>
+    <div id="conflicts-list"></div>
+  </section>
+
+  <section class="panel" data-panel="facts" hidden>
+    <div class="controls">
+      <input type="search" id="fact-search" placeholder="search metric, value or evidence">
+      <span class="muted small" id="facts-count"></span>
+    </div>
+    <div id="facts-list"></div>
+  </section>
+
+  <section class="panel" data-panel="clusters" hidden>
+    <p class="muted small">
+      A cluster groups facts sharing an entity, metric and period &mdash; the set the
+      comparison engine reasons over. Clusters spanning several documents are where
+      cross-document reconciliation happens.
+    </p>
+    <div id="clusters-list"></div>
+  </section>
+
+  <section class="panel" data-panel="upload" hidden>
+    <div class="controls">
+      <input type="file" id="file-input" accept="application/pdf">
+      <span id="upload-status"></span>
+    </div>
+    <p class="muted small">
+      The PDF is parsed, segmented, extracted, grounded and reconciled against
+      everything already ingested. Only clusters the new document touches are
+      recomputed.
+    </p>
+  </section>
+</main>
+
+<script type="module" src="/static/js/ui.js"></script>
+</body>
+</html>
