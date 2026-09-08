@@ -126,13 +126,17 @@ def main() -> int:
             )
 
         checked = totals["grounded"] + totals["ungrounded"]
+        # Counted from storage rather than summed across documents: reconciling
+        # a later document rewrites clusters an earlier one already wrote, so
+        # adding up per-document totals counts the same relation twice.
+        relations = conn.execute("SELECT COUNT(*) FROM relations").fetchone()[0]
+        facts = conn.execute("SELECT COUNT(*) FROM facts").fetchone()[0]
         print(
             f"\n{'=' * 62}\n"
-            f"{totals['stored']} facts · {totals['relations']} relations · "
-            f"{time.time() - started:.0f}s\n"
+            f"{facts} facts · {relations} relations · {time.time() - started:.0f}s\n"
             f"grounding rejected {totals['ungrounded'] / checked:.2%}"
             if checked
-            else f"\n{totals['stored']} facts"
+            else f"\n{facts} facts"
         )
 
         print("\nverdicts:")

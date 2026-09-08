@@ -393,7 +393,7 @@ like `2017-23`, table line-wrap artifacts) with no false rejections.
 |---|---|
 | Documents / pages | 5 / 411 |
 | Facts extracted | 351 |
-| Relations found | 61 |
+| Relations found | 55 |
 | Grounding rejection rate | **0.56%** |
 | Rebuild from cache | 3s |
 | Tests | 138 |
