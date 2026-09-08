@@ -233,6 +233,14 @@ learn that a subject restating the metric is not an entity — the IMF's project
 arrived with subject "real GDP growth" instead of "India", which silently
 prevented it ever meeting the RBI's figure for the same quantity.
 
+**Document metadata is read by the model and is sometimes wrong.** The Economic
+Survey excerpt is attributed to the Reserve Bank of India, because RBI is named
+throughout the text and the model took the most prominent organisation rather
+than the publisher. This matters: `source_tier` is derived from document type,
+so a misread type mis-ranks a source when two facts conflict. A stricter
+approach would read the publisher from the cover page alone, or verify it
+against the document's own header and footer.
+
 **No OCR path.** Every starter PDF has a clean text layer. A scanned PDF yields
 close to nothing; the fix is a VLM fallback when the text layer is empty.
 

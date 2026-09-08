@@ -32,9 +32,22 @@ def _slot(value: str | None) -> str:
     return cleaned or WILDCARD
 
 
-def core_key(*, entity: str, metric: str, period: Period | None) -> str:
-    """Identity of the thing being measured, over the period measured."""
-    period_part = period.key if period is not None else WILDCARD
+def core_key(
+    *, entity: str, metric: str, period: Period | None, period_raw: str = ""
+) -> str:
+    """Identity of the thing being measured, over the period measured.
+
+    When a period label cannot be parsed into an interval, the label itself is
+    used rather than a wildcard. Two facts whose periods merely failed to parse
+    are not thereby the same period: a sentence describing a change "from Rs 3
+    lakh to Rs 5 lakh" yields values labelled "before" and "after", and treating
+    both as period-unknown collapsed them into one cluster where they looked
+    like a conflict.
+    """
+    if period is not None:
+        period_part = period.key
+    else:
+        period_part = _slot(period_raw)
     return f"{_slot(entity)}|{_slot(metric)}|{period_part}"
 
 

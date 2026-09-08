@@ -239,7 +239,12 @@ def normalize_candidate(
     basis = canonical_basis(candidate.basis_raw)
     variant = canonical_variant(candidate.variant_raw, candidate.metric)
 
-    core = core_key(entity=entity_name, metric=metric_name, period=period)
+    core = core_key(
+        entity=entity_name,
+        metric=metric_name,
+        period=period,
+        period_raw=candidate.period_raw,
+    )
     full = full_key(core, basis=basis, modality=candidate.modality, variant=variant)
 
     return NormalizedFact(

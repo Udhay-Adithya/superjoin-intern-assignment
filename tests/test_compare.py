@@ -254,3 +254,21 @@ def test_the_same_disagreement_across_blocks_is_still_a_contradiction() -> None:
     relation = compare(a, b)
     assert relation is not None
     assert relation.verdict == CONTRADICTS
+
+
+def test_unparseable_period_labels_still_separate_facts() -> None:
+    """Found in the UI, on a real RBI sentence.
+
+    "enhancement of credit limit ... from Rs 3 lakh to Rs 5 lakh" gives two
+    values the extractor labels "before" and "after". Neither parses into an
+    interval, and treating both as period-unknown put them in one cluster where
+    they looked like a conflict. The labels differ, so the facts differ.
+    """
+    before = core_key(entity="rbi", metric="credit limit", period=None, period_raw="before")
+    after = core_key(entity="rbi", metric="credit limit", period=None, period_raw="after")
+    assert before != after
+
+    # Two facts that genuinely state no period at all still share a key.
+    blank_a = core_key(entity="rbi", metric="credit limit", period=None, period_raw="")
+    blank_b = core_key(entity="rbi", metric="credit limit", period=None, period_raw="")
+    assert blank_a == blank_b
