@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import threading
 import time
+from typing import ClassVar
 
 from app.llm.client import TokenBudget
 
@@ -117,7 +118,7 @@ def test_backoff_prefers_the_providers_stated_delay() -> None:
     from app.llm.client import LLMClient
 
     class FakeResponse:
-        headers = {"retry-after": "12"}
+        headers: ClassVar[dict[str, str]] = {"retry-after": "12"}
 
     class FakeError(Exception):
         response = FakeResponse()
