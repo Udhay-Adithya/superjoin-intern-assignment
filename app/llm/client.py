@@ -42,8 +42,11 @@ from app import config
 
 DEFAULT_MAX_TOKENS = 8000
 RETRY_MAX_TOKENS = 16000
-MAX_ATTEMPTS = 4
+MAX_ATTEMPTS = 5
 REQUEST_TIMEOUT = 600.0
+
+# Longer than the 60-second window a per-minute quota resets on.
+MAX_BACKOFF = 75.0
 
 
 class LLMError(RuntimeError):
@@ -236,7 +239,7 @@ class LLMClient:
                 # already free.
                 self._budget.release(reservation)
                 last_error = exc
-                self._backoff(attempt)
+                self._backoff(attempt, exc)
                 continue
             except APIStatusError as exc:
                 self._budget.release(reservation)
@@ -245,7 +248,7 @@ class LLMClient:
                 # retryable rather than fatal.
                 if exc.status_code in (408, 413, 429) or exc.status_code >= 500:
                     last_error = exc
-                    self._backoff(attempt)
+                    self._backoff(attempt, exc)
                     continue
                 # Providers reject parameters they do not implement. Drop the
                 # optional ones and retry rather than failing the whole run.
@@ -285,8 +288,35 @@ class LLMClient:
         raise LLMError(f"{model}: failed after {MAX_ATTEMPTS} attempts ({last_error})")
 
     @staticmethod
-    def _backoff(attempt: int) -> None:
-        time.sleep(min(2**attempt + random.random(), 30.0))
+    def _retry_after(exc: Exception | None) -> float | None:
+        """The provider's own advice on when to try again, if it gave any."""
+        if exc is None:
+            return None
+        response = getattr(exc, "response", None)
+        headers = getattr(response, "headers", None) or {}
+        raw = headers.get("retry-after") or headers.get("x-ratelimit-reset-tokens")
+        if not raw:
+            return None
+        text = str(raw).strip()
+        if text.endswith("s") and "m" not in text:
+            text = text[:-1]
+        try:
+            return float(text)
+        except ValueError:
+            return None
+
+    @classmethod
+    def _backoff(cls, attempt: int, exc: Exception | None = None) -> None:
+        """Wait before retrying, preferring the provider's stated delay.
+
+        Exponential backoff alone was too short to help against a per-minute
+        quota: 1+2+4+8 seconds all fall inside the same blocked window, so every
+        attempt failed for the same reason and whole regions were lost. The
+        ceiling is now longer than the window itself.
+        """
+        advised = cls._retry_after(exc)
+        delay = advised + 0.5 if advised is not None else 2**attempt + random.random()
+        time.sleep(min(delay, MAX_BACKOFF))
 
     # --- structured output ------------------------------------------------
 

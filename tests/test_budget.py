@@ -105,3 +105,27 @@ def test_a_failed_request_gives_its_reservation_back() -> None:
     started = time.monotonic()
     budget.acquire(2500)  # would block if the failures still held their budget
     assert time.monotonic() - started < 0.5
+
+
+def test_backoff_prefers_the_providers_stated_delay() -> None:
+    """A per-minute quota needs a wait longer than exponential backoff gives.
+
+    1+2+4+8 seconds all land inside the same blocked 60-second window, so every
+    attempt fails for the same reason. When the provider says when to come
+    back, that is the number to use.
+    """
+    from app.llm.client import LLMClient
+
+    class FakeResponse:
+        headers = {"retry-after": "12"}
+
+    class FakeError(Exception):
+        response = FakeResponse()
+
+    assert LLMClient._retry_after(FakeError()) == 12.0
+    assert LLMClient._retry_after(None) is None
+
+    class NoHeaders(Exception):
+        response = None
+
+    assert LLMClient._retry_after(NoHeaders()) is None
