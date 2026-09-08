@@ -1,0 +1,30 @@
+# design notes (kept local)
+DESIGN.md
+
+# secrets
+.env
+
+# python
+__pycache__/
+*.py[cod]
+.venv/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+
+# data
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+data/
+storage/
+
+# llm response cache
+.cache/
+
+# node (typescript toolchain only; compiled js IS committed)
+node_modules/
+
+# os
+.DS_Store
