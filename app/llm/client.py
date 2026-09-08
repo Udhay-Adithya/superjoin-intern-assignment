@@ -88,8 +88,13 @@ class TokenBudget:
                     self._window.append((now, estimated))
                     return
                 oldest = self._window[0][0] if self._window else now
-            # Sleep only until the oldest entry leaves the window.
-            time.sleep(max(0.05, 60.0 - (time.monotonic() - oldest)))
+                wait = 60.0 - (now - oldest)
+
+            # Poll rather than sleeping out the whole window: entries expire
+            # continuously, so capacity usually frees up well before the oldest
+            # one does, and several waiting threads would otherwise all sleep
+            # the maximum and then wake together.
+            time.sleep(max(0.1, min(wait, 2.0)))
 
     def settle(self, estimated_tokens: int, actual_tokens: int) -> None:
         """Correct the reservation once the true cost is known."""

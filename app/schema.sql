@@ -125,7 +125,14 @@ CREATE TABLE IF NOT EXISTS relations (
     explanation        TEXT,
     confidence         REAL    NOT NULL DEFAULT 0.0,
     qualifier_inferred INTEGER NOT NULL DEFAULT 0,
+
+    -- A model reviews flagged pairs but does not overrule the deterministic
+    -- verdict. Its assessment is recorded alongside so a disagreement between
+    -- rule and reviewer is visible rather than silently resolved.
     adjudicated        INTEGER NOT NULL DEFAULT 0,
+    adjudicator_agrees INTEGER,
+    adjudicator_note   TEXT,
+    missing_context    TEXT,
     created_at         TEXT    NOT NULL DEFAULT (datetime('now')),
     UNIQUE (fact_a, fact_b)
 );
