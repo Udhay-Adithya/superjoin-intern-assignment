@@ -27,9 +27,13 @@ GAP_TOLERANCE = 2.0
 # without being treated as a jump back up the page.
 BACKTRACK_TOLERANCE = 1.2
 
-# A region wider than this fraction of the page is spanning columns that are not
-# actually related -- these pages are two-page spreads.
-MAX_WIDTH_RATIO = 0.60
+# A region spanning nearly the whole page is merging columns that are not
+# related -- several of these PDFs are two-page spreads with four text columns.
+# The cap has to stay loose enough for a landscape slide, where one table
+# legitimately spans the full width: at 0.60 the earnings deck's financial
+# tables were shredded into individual rows stripped of their headers, and the
+# deck yielded no facts at all.
+MAX_WIDTH_RATIO = 0.90
 
 # Extraction output scales with how many values a region contains, and reasoning
 # models spend their whole token budget before answering if a region is too

@@ -108,16 +108,36 @@ def canonical_variant(raw: str | None, metric: str = "") -> str | None:
     return None
 
 
+def is_entity_like(subject: str, metric: str) -> bool:
+    """Is this really the thing being measured, or the measurement itself?
+
+    Models routinely fill ``subject`` with the metric when a sentence has no
+    explicit actor -- the IMF's projection came back with subject "real GDP
+    growth" rather than "India". That silently creates a bogus entity, and
+    because the entity is part of the core key it stops the fact ever being
+    compared with the same figure from another source.
+    """
+    subject_key = canonical_metric_name(subject)
+    metric_key = canonical_metric_name(metric)
+    if not subject_key:
+        return False
+    if subject_key == metric_key:
+        return False
+    # "revenue from operations" as a subject when the metric is "revenue" -- one
+    # phrase contains the other, so it is a restatement of the measure.
+    return not (subject_key in metric_key or metric_key in subject_key)
+
+
 def resolve_entity(
-    raw: str, *, registry: Registry, default_entity: str = ""
+    raw: str, *, registry: Registry, default_entity: str = "", metric: str = ""
 ) -> tuple[int | None, str]:
     """Resolve an entity mention, falling back to the document's subject.
 
     Filings refer to their own subject as "the Company" or "your Company".
     Those carry no identity of their own, so they resolve to whichever entity
-    the document is about.
+    the document is about -- as does a subject that merely restates the metric.
     """
-    canonical = canonical_entity_name(raw)
+    canonical = canonical_entity_name(raw) if is_entity_like(raw, metric) else ""
     if not canonical:
         canonical = canonical_entity_name(default_entity)
     if not canonical:
@@ -158,7 +178,10 @@ def normalize_candidate(
     metric_registry = Registry(conn, "metrics")
 
     entity_id, entity_name = resolve_entity(
-        candidate.subject, registry=entity_registry, default_entity=default_entity
+        candidate.subject,
+        registry=entity_registry,
+        default_entity=default_entity,
+        metric=candidate.metric,
     )
     if not entity_name:
         raise NormalizationError("no resolvable entity")

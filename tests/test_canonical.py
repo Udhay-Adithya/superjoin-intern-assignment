@@ -11,7 +11,7 @@ from app.normalize.canonical import (
     canonical_metric_name,
     normalize_phrase,
 )
-from app.normalize.facts import canonical_basis, canonical_variant
+from app.normalize.facts import canonical_basis, canonical_variant, is_entity_like
 
 
 @pytest.fixture
@@ -138,3 +138,34 @@ def test_registry_grows_for_unseen_metrics(conn) -> None:
 def test_normalize_phrase_keeps_percent_signs() -> None:
     """Percent is part of the measure, not punctuation to strip."""
     assert "%" in normalize_phrase("growth %")
+
+
+# --- subject vs metric --------------------------------------------------
+
+
+def test_a_subject_that_restates_the_metric_is_not_an_entity() -> None:
+    """Found in a live run.
+
+    The IMF's FY2025-26 projection came back with subject "real GDP growth"
+    instead of "India". Because the entity is part of the core key, that fact
+    could never meet the RBI's projection of the same figure.
+    """
+    assert not is_entity_like("real GDP growth", "real GDP growth")
+    assert not is_entity_like("revenue from operations", "revenue")
+    assert not is_entity_like("headline inflation", "headline inflation rate")
+
+
+def test_a_genuine_subject_survives() -> None:
+    assert is_entity_like("India", "real GDP growth")
+    assert is_entity_like("Delhivery Limited", "revenue from operations")
+    assert is_entity_like("Falcon Autotech", "stake")
+
+
+def test_metric_shaped_subject_falls_back_to_the_document_entity(conn) -> None:
+    from app.normalize.facts import resolve_entity
+
+    registry = Registry(conn, "entities")
+    _, name = resolve_entity(
+        "real GDP growth", registry=registry, default_entity="India", metric="real GDP growth"
+    )
+    assert name == "india"
