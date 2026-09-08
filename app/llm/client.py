@@ -40,7 +40,7 @@ from openai import APIConnectionError, APIStatusError, OpenAI, RateLimitError
 
 from app import config
 
-DEFAULT_MAX_TOKENS = 4000
+DEFAULT_MAX_TOKENS = 8000
 RETRY_MAX_TOKENS = 16000
 MAX_ATTEMPTS = 4
 REQUEST_TIMEOUT = 600.0
@@ -374,6 +374,10 @@ def _estimate_tokens(messages: Sequence[dict], max_tokens: int) -> int:
     budget; the reservation is corrected from reported usage once known.
     """
     prompt_chars = sum(len(str(m.get("content", ""))) for m in messages)
+    # The output allowance is capped well below max_tokens on purpose: an
+    # extraction rarely uses its whole ceiling, and reserving the ceiling would
+    # throttle throughput to a fraction of the real limit. The reservation is
+    # corrected from reported usage as soon as the call returns.
     return int(prompt_chars / 3.5) + min(max_tokens, 1500)
 
 
