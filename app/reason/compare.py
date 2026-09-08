@@ -53,6 +53,7 @@ class ComparableFact:
     doc_id: int
     core_key: str
     block_id: int = 0
+    unit_raw: str = ""
 
     # provenance, used for explanation and trust ordering
     publisher: str = ""
@@ -140,6 +141,19 @@ def _format(fact: ComparableFact) -> str:
     return f"{fact.value_raw}{(' ' + unit) if unit else ''}".strip()
 
 
+def _written(fact: ComparableFact) -> str:
+    """The figure as the document wrote it, including its scale.
+
+    Reporting only the normalized magnitude would hide the very thing that makes
+    a corroboration interesting -- that "81,415.38 million" and "8,142 Cr" are
+    the same quantity in different notation.
+    """
+    unit = (fact.unit_raw or "").strip()
+    if not unit and fact.unit_class == "percent":
+        unit = "%"
+    return f"{fact.value_raw} {unit}".strip()
+
+
 def _qualifier_phrase(fact: ComparableFact, field: str) -> str:
     return str(getattr(fact, field, None) or "unstated")
 
@@ -169,8 +183,9 @@ def compare(a: ComparableFact, b: ComparableFact) -> Relation | None:
             return Relation(
                 a.id, b.id, CORROBORATES, "agrees_despite_differing_qualifiers",
                 explanation=(
-                    f"Both report {_format(a)} for the same period despite differing on "
-                    f"{', '.join(differing)}."
+                    f"Same quantity, written differently: {_written(a)} and {_written(b)} "
+                    f"are the same figure once scaled, for the same period, "
+                    f"despite differing on {', '.join(differing)}."
                 ),
                 delta=delta, tolerance=tolerance, qualifier_inferred=inferred,
             )
@@ -208,7 +223,7 @@ def compare(a: ComparableFact, b: ComparableFact) -> Relation | None:
         return Relation(
             a.id, b.id, CORROBORATES, "within_implied_precision",
             explanation=(
-                f"{_format(a)} and {_format(b)} agree to within {tolerance:,.4g}, "
+                f"{_written(a)} and {_written(b)} agree to within {tolerance:,.4g}, "
                 f"the precision their own notation implies."
             ),
             delta=delta, tolerance=tolerance, qualifier_inferred=inferred,

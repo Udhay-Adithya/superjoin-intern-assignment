@@ -311,6 +311,7 @@ def _row_to_comparable(row: sqlite3.Row) -> ComparableFact:
         doc_id=int(row["doc_id"]),
         core_key=row["core_key"] or "",
         block_id=int(row["block_id"] or 0),
+        unit_raw=row["unit_raw"] or "",
         publisher=row["publisher"] or "",
         published_date=row["published_date"],
         source_tier=int(row["source_tier"] or 50),
@@ -335,6 +336,30 @@ def load_cluster(conn: sqlite3.Connection, core_key: str) -> list[ComparableFact
     return [_row_to_comparable(r) for r in rows]
 
 
+def _collapse_collisions(relations: list, facts: list[ComparableFact]) -> list:
+    """Keep one representative per colliding block, not every pair.
+
+    A dense table whose rows all normalize to the same metric produces a
+    quadratic number of identical findings -- the earnings deck alone generated
+    167 of them. They all say the same thing: the labels in this block collapsed.
+    One finding per block is the signal; the rest buries the genuine
+    cross-document relations underneath it.
+    """
+    block_of = {fact.id: fact.block_id for fact in facts}
+    kept, seen_blocks = [], set()
+
+    for relation in relations:
+        if relation.rule != "metric_label_collision":
+            kept.append(relation)
+            continue
+        block = block_of.get(relation.fact_a, 0)
+        if block in seen_blocks:
+            continue
+        seen_blocks.add(block)
+        kept.append(relation)
+    return kept
+
+
 def reconcile_keys(conn: sqlite3.Connection, core_keys: set[str]) -> int:
     """Recompute relations for the given clusters only.
 
@@ -355,7 +380,7 @@ def reconcile_keys(conn: sqlite3.Connection, core_keys: set[str]) -> int:
             (*ids, *ids),
         )
 
-        for relation in compare_cluster(facts):
+        for relation in _collapse_collisions(compare_cluster(facts), facts):
             conn.execute(
                 "INSERT OR IGNORE INTO relations "
                 "(fact_a, fact_b, verdict, rule, delta, explanation, confidence, "
