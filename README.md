@@ -240,12 +240,20 @@ close to nothing; the fix is a VLM fallback when the text layer is empty.
 multi-row headers degrade. `find_tables()` was tried first and found only the
 ruled header rows of these borderless financial tables, dropping every data row.
 
-**Throughput is bounded by the provider, not the design.** Parsing and reconciling
-all 511 starter pages takes about three seconds. Extraction is ~9.8M tokens, and
-a free tier metered at 8,000 tokens per minute turns that into roughly twenty
-hours. `scripts/demo_corpus.py` therefore ingests the sections carrying the four
-required cases; `scripts/ingest.py` will run the whole corpus given time or a
-paid tier.
+**Throughput is bounded by the provider, not the design.** Parsing and
+reconciling all 511 starter pages takes about three seconds, and the demo corpus
+rebuilds from cache in eight. Extraction is the cost: roughly 9.8M tokens for
+the full corpus against a free tier capped at **200,000 tokens per day** and
+8,000 per minute. That is a hard ceiling no amount of engineering removes, so
+`scripts/demo_corpus.py` ingests the sections carrying the required cases and
+`scripts/ingest.py` runs arbitrary PDFs given a larger quota.
+
+The daily cap is worth calling out because it is invisible until it bites: it
+returns the same HTTP 429 as a per-minute breach, and the per-minute headers
+keep reporting healthy remaining capacity while every request fails. Hours went
+into diagnosing "rate limiting" that was really a daily budget. The client now
+distinguishes the two and fails immediately with the numbers, rather than
+retrying something that cannot succeed.
 
 **Cross-currency comparison is refused rather than attempted**, since it needs an
 FX rate and an as-of date.
@@ -261,6 +269,26 @@ parser turning `uploads/2023/04/` — a URL path in a footnote — into a fiscal
 ending in **2104**. The fix generalizes: a fiscal span covers two *consecutive*
 years. It now correctly rejects 83 occurrences (URL fragments, multi-year ranges
 like `2017-23`, table line-wrap artifacts) with no false rejections.
+
+### Measured on the demo corpus
+
+| | |
+|---|---|
+| Facts extracted | 298 |
+| Relations found | 61 |
+| Grounding rejection rate | **0.00%** |
+| Rebuild from cache | 8s |
+| Tests | 129 |
+
+Verdict breakdown:
+
+```
+corroborates  agrees_despite_differing_qualifiers  17
+reconciled    different_basis                      14
+reconciled    different_variant                    12
+reconciled    metric_label_collision                8
+corroborates  within_implied_precision              4
+```
 
 The first live extraction rejected **77%** of facts. The model was assembling
 quotes by pairing a row label with one of its values — `"Revenue from Operations
