@@ -79,8 +79,15 @@ def ingest_document(
     metadata_model: str | None = None,
     workers: int = 8,
     max_regions: int | None = None,
+    pages: tuple[int, int] | None = None,
 ) -> IngestReport:
-    """Parse, extract, ground, normalize and store one PDF."""
+    """Parse, extract, ground, normalize and store one PDF.
+
+    ``pages`` restricts extraction to an inclusive 1-indexed page range. The
+    whole document is still parsed and stored, so evidence offsets stay valid;
+    only the LLM calls are limited. Useful for iterating on a section without
+    paying to re-extract a hundred pages.
+    """
     path = Path(path)
     parsed = parse_pdf(path)
 
@@ -147,6 +154,9 @@ def ingest_document(
         )
 
     targets = [(i, r) for i, r in enumerate(regions) if _fact_bearing(r)]
+    if pages is not None:
+        first, last = pages
+        targets = [(i, r) for i, r in targets if first <= r.page_no <= last]
     if max_regions is not None:
         targets = targets[:max_regions]
     report.n_regions_extracted = len(targets)
