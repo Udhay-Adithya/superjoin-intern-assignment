@@ -5,6 +5,8 @@ Every figure is real and taken from the starter documents.
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 from app.normalize.numbers import normalize_quantity
 from app.normalize.periods import parse_period
 from app.reason.compare import (
@@ -219,3 +221,36 @@ def test_later_vintage_wins_at_equal_authority() -> None:
     older = make(1, "6.4", "per cent", published_date="2025-01-30", source_tier=70)
     newer = make(2, "6.5", "per cent", published_date="2025-11-06", source_tier=70)
     assert prefer(older, newer).id == 2
+
+
+def test_same_block_disagreement_is_a_label_collision_not_a_contradiction() -> None:
+    """Found in a live run, not imagined.
+
+    Page 23 of the FY24 annual report lists "300,000 Preference Shares of Rs 10
+    each" and "4,660,337 Preference Shares of Rs 100 each". Both normalized to
+    the metric "preference shares authorised", and the engine called them a
+    contradiction. They are two share classes in one list; a document does not
+    contradict itself inside a single passage.
+    """
+    small = make(1, "300,000", "", metric="preference shares authorised")
+    large = make(2, "4,660,337", "", metric="preference shares authorised")
+    small = replace(small, block_id=287)
+    large = replace(large, block_id=287)
+
+    relation = compare(small, large)
+    assert relation is not None
+    assert relation.verdict == RECONCILED
+    assert relation.rule == "metric_label_collision"
+    assert relation.needs_adjudication
+
+
+def test_the_same_disagreement_across_blocks_is_still_a_contradiction() -> None:
+    """The collision rule must not suppress genuine cross-source conflicts."""
+    a = make(1, "300,000", "", metric="preference shares authorised")
+    b = make(2, "4,660,337", "", metric="preference shares authorised", doc_id=2)
+    a = replace(a, block_id=10)
+    b = replace(b, block_id=99)
+
+    relation = compare(a, b)
+    assert relation is not None
+    assert relation.verdict == CONTRADICTS

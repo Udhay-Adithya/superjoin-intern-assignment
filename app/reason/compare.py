@@ -52,6 +52,7 @@ class ComparableFact:
     variant: str | None
     doc_id: int
     core_key: str
+    block_id: int = 0
 
     # provenance, used for explanation and trust ordering
     publisher: str = ""
@@ -183,6 +184,23 @@ def compare(a: ComparableFact, b: ComparableFact) -> Relation | None:
                 f"{_format(b)} is {_qualifier_phrase(b, field)}."
             ),
             delta=delta, tolerance=tolerance, qualifier_inferred=inferred,
+        )
+
+    # A document does not contradict itself inside a single extracted region.
+    # When two figures from one block share a full key and disagree, the metric
+    # labels collapsed two different things -- a before-and-after pair in one
+    # sentence, or two share classes distinguished only by face value. Reporting
+    # that as a contradiction would blame the document for our own resolution.
+    if not agrees and a.block_id and a.block_id == b.block_id:
+        return Relation(
+            a.id, b.id, RECONCILED, "metric_label_collision",
+            explanation=(
+                f"Same source passage, so not a document conflict: {_format(a)} and "
+                f"{_format(b)} were both read as '{a.metric}'. They are different "
+                f"quantities whose distinguishing detail was lost in extraction."
+            ),
+            delta=delta, tolerance=tolerance, qualifier_inferred=inferred,
+            needs_adjudication=True,
         )
 
     # --- same full key: any difference is a real disagreement ------------

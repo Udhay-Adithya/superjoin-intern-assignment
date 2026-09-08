@@ -310,6 +310,7 @@ def _row_to_comparable(row: sqlite3.Row) -> ComparableFact:
         variant=row["variant"],
         doc_id=int(row["doc_id"]),
         core_key=row["core_key"] or "",
+        block_id=int(row["block_id"] or 0),
         publisher=row["publisher"] or "",
         published_date=row["published_date"],
         source_tier=int(row["source_tier"] or 50),

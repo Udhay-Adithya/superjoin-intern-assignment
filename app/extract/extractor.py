@@ -114,21 +114,31 @@ Rules:
 3. `basis_raw` captures scope qualifiers such as Standalone or Consolidated.
 4. `variant_raw` captures a distinction that changes what is being counted,
    such as real vs nominal, or revenue from services vs revenue from customers.
-5. `period_raw` must be the FULL period description, combining header rows if
+   If two values in the same passage share a label but describe different things,
+   the detail that separates them belongs here. "300,000 Preference Shares of
+   Rs 10 each" and "4,660,337 Preference Shares of Rs 100 each" are two share
+   classes, so their face values are the variant. Without it they read as one
+   metric with two conflicting values.
+5. When a sentence describes a change -- "increasing it from X to Y", "up from
+   X to Y" -- X and Y are the same metric at DIFFERENT points in time, not two
+   competing values. Give them different `period_raw` values ("before" and
+   "after" the described change if no dates are given), or extract only the
+   resulting figure Y.
+6. `period_raw` must be the FULL period description, combining header rows if
    the period is split across them. A column headed "Consolidated - FY ended"
    above "March 31, 2024" describes the year ending on that date, so write
    "FY ended March 31, 2024", not "March 31, 2024".
-6. `quote` MUST be copied character for character from the excerpt.
+7. `quote` MUST be copied character for character from the excerpt.
    For a table row, quote the WHOLE line as it appears, including the other
    values on that line and the spacing between them. Do NOT assemble a quote by
    pairing a row label with just one of its values -- that string does not exist
    in the document and the fact will be discarded.
-7. `modality` says what kind of claim it is:
+8. `modality` says what kind of claim it is:
    - "actual" for a reported outturn
    - "projected" for a forecast of a future period
    - "estimated" for a provisional or estimated figure
    - "restated" for a previously reported figure now revised
-8. Extract only what is present. If the excerpt has no facts, return an empty list.
+9. Extract only what is present. If the excerpt has no facts, return an empty list.
 
 EXCERPT (from page {page_no}):
 {excerpt}"""
