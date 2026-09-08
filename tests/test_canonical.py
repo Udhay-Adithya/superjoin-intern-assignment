@@ -11,7 +11,12 @@ from app.normalize.canonical import (
     canonical_metric_name,
     normalize_phrase,
 )
-from app.normalize.facts import canonical_basis, canonical_variant, is_entity_like
+from app.normalize.facts import (
+    canonical_basis,
+    canonical_variant,
+    is_entity_like,
+    split_metric_variant,
+)
 
 
 @pytest.fixture
@@ -169,3 +174,40 @@ def test_metric_shaped_subject_falls_back_to_the_document_entity(conn) -> None:
         "real GDP growth", registry=registry, default_entity="India", metric="real GDP growth"
     )
     assert name == "india"
+
+
+# --- metric / variant split ---------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("metric", "head", "tail"),
+    [
+        # the split that makes case 1 work across documents
+        ("Revenue from Operations", "revenue", "operations"),
+        ("Revenue from customers (A+B)", "revenue", "customers"),
+        ("Revenue for services (A)", "revenue", "services"),
+        ("provision for tax", "provision", "tax"),
+        # a determiner means the tail is a period, not a qualifier
+        ("Loss for the year", "loss for the year", None),
+        ("Profit for the period", "profit for the period", None),
+        # nothing to split
+        ("Total Income", "total income", None),
+        ("Other income", "other income", None),
+    ],
+)
+def test_metric_variant_split(metric: str, head: str, tail: str | None) -> None:
+    assert split_metric_variant(metric) == (head, tail)
+
+
+def test_the_annual_report_and_the_deck_reach_the_same_metric() -> None:
+    """Case 1 depends entirely on this.
+
+    The annual report says "revenue from operations" and the earnings deck says
+    "revenue from customers". Both report 8,142 crore for FY24. Leaving the tail
+    inside the metric gave them different core keys, so they were never compared.
+    """
+    annual_head, annual_tail = split_metric_variant("Revenue from Operations")
+    deck_head, deck_tail = split_metric_variant("Revenue from customers (A+B)")
+
+    assert annual_head == deck_head, "the two must share a metric to be compared"
+    assert annual_tail != deck_tail, "but the variant must still tell them apart"

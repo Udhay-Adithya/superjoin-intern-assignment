@@ -19,6 +19,7 @@ from app.normalize.canonical import (
     Registry,
     canonical_entity_name,
     canonical_metric_name,
+    normalize_phrase,
 )
 from app.normalize.numbers import Quantity, normalize_quantity
 from app.normalize.periods import Period, parse_period
@@ -86,6 +87,45 @@ def canonical_basis(raw: str | None) -> str | None:
     return None
 
 
+# Financial statements name a measure and then qualify what it counts with a
+# prepositional tail: "revenue from operations", "revenue for services",
+# "provision for tax".
+_VARIANT_SEPARATORS = (" from ", " for ")
+
+# A tail that starts with a determiner is grammar, not a qualifier: "loss for
+# the year" names a period, whereas "revenue for services" names what is being
+# counted. Splitting the former would strip "loss" of the only word that says
+# which loss it is.
+_TAIL_STOPWORDS = frozenset({"the", "a", "an", "this", "that", "these", "those", "each"})
+
+
+def split_metric_variant(metric: str) -> tuple[str, str | None]:
+    """Separate a measure from the tail that says what it counts.
+
+    "revenue from operations" becomes ("revenue", "operations") and "revenue
+    from customers" becomes ("revenue", "customers"). Both then share a metric,
+    so they land in the same cluster and can be compared -- while the differing
+    variant keeps them from being treated as interchangeable.
+
+    Leaving the tail inside the metric was why the annual report's
+    "revenue from operations" never met the earnings deck's "revenue from
+    customers", even though both report the same 8,142 crore for FY24.
+    """
+    lowered = normalize_phrase(metric)
+    for separator in _VARIANT_SEPARATORS:
+        if separator in lowered:
+            head, tail = lowered.split(separator, 1)
+            head, tail = head.strip(), tail.strip()
+            # Only the leading word of the tail: "customers (A+B)" and
+            # "customers" must reduce to the same variant.
+            if head and tail:
+                first = tail.split(" ")[0]
+                if first in _TAIL_STOPWORDS:
+                    return lowered, None
+                return head, first
+    return lowered, None
+
+
 def canonical_variant(raw: str | None, metric: str = "") -> str | None:
     """Reduce a measure variant to a canonical term.
 
@@ -99,13 +139,12 @@ def canonical_variant(raw: str | None, metric: str = "") -> str | None:
         if term in haystack:
             return term
 
-    # Fall back to the qualifying phrase after "from", which is how these
-    # documents distinguish revenue measures.
-    if " from " in haystack:
-        tail = haystack.split(" from ", 1)[1].strip()
-        if tail:
-            return tail.split(" ")[0]
-    return None
+    explicit = normalize_phrase(raw or "")
+    if explicit:
+        return explicit.split(" ")[0]
+
+    _, tail = split_metric_variant(metric)
+    return tail
 
 
 def is_entity_like(subject: str, metric: str) -> bool:
@@ -186,8 +225,13 @@ def normalize_candidate(
     if not entity_name:
         raise NormalizationError("no resolvable entity")
 
+    # The qualifying tail moves into `variant`, so the measure itself is what
+    # gets resolved and clustered.
+    metric_head, _ = split_metric_variant(candidate.metric)
     metric_id, metric_name = resolve_metric(
-        candidate.metric, registry=metric_registry, unit_class=quantity.unit_class
+        metric_head or candidate.metric,
+        registry=metric_registry,
+        unit_class=quantity.unit_class,
     )
     if not metric_name:
         raise NormalizationError("no resolvable metric")
