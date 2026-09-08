@@ -1,0 +1,128 @@
+"""Every label here is copied verbatim out of the starter PDFs."""
+
+from __future__ import annotations
+
+from datetime import date
+
+import pytest
+
+from app.normalize.periods import (
+    KIND_CALENDAR_QUARTER,
+    KIND_FISCAL_QUARTER,
+    KIND_FISCAL_YEAR,
+    parse_period,
+)
+
+
+@pytest.mark.parametrize(
+    ("label", "start", "end"),
+    [
+        ("FY24", date(2023, 4, 1), date(2024, 3, 31)),
+        ("FY23", date(2022, 4, 1), date(2023, 3, 31)),
+        ("FY 2023-24", date(2023, 4, 1), date(2024, 3, 31)),
+        ("FY2023-24", date(2023, 4, 1), date(2024, 3, 31)),
+        # the IMF writes its fiscal years with a slash
+        ("FY2025/26", date(2025, 4, 1), date(2026, 3, 31)),
+        ("FY2024/25", date(2024, 4, 1), date(2025, 3, 31)),
+        # RBI and the Economic Survey drop the FY prefix entirely
+        ("2024-25", date(2024, 4, 1), date(2025, 3, 31)),
+        # the annual report spells it out
+        ("FY ended March 31, 2024", date(2023, 4, 1), date(2024, 3, 31)),
+        ("financial year ended March 31, 2023", date(2022, 4, 1), date(2023, 3, 31)),
+    ],
+)
+def test_fiscal_years(label: str, start: date, end: date) -> None:
+    p = parse_period(label)
+    assert p is not None, label
+    assert (p.start, p.end) == (start, end)
+    assert p.kind == KIND_FISCAL_YEAR
+
+
+@pytest.mark.parametrize(
+    ("label", "start", "end"),
+    [
+        ("Q4 FY24", date(2024, 1, 1), date(2024, 3, 31)),
+        ("Q3 FY24", date(2023, 10, 1), date(2023, 12, 31)),
+        ("Q1 FY25", date(2024, 4, 1), date(2024, 6, 30)),
+        ("Q2 FY25", date(2024, 7, 1), date(2024, 9, 30)),
+        ("Q4 FY23", date(2023, 1, 1), date(2023, 3, 31)),
+    ],
+)
+def test_fiscal_quarters(label: str, start: date, end: date) -> None:
+    p = parse_period(label)
+    assert p is not None, label
+    assert (p.start, p.end) == (start, end)
+    assert p.kind == KIND_FISCAL_QUARTER
+
+
+def test_half_years() -> None:
+    p = parse_period("H1 FY25")
+    assert p is not None
+    assert (p.start, p.end) == (date(2024, 4, 1), date(2024, 9, 30))
+
+
+def test_imf_calendar_quarter_is_not_a_fiscal_quarter() -> None:
+    p = parse_period("2025Q2")
+    assert p is not None
+    assert p.kind == KIND_CALENDAR_QUARTER
+    assert (p.start, p.end) == (date(2025, 4, 1), date(2025, 6, 30))
+
+
+def test_case_four_the_fiscal_calendar_quarter_collision() -> None:
+    """The trap this module exists to defuse.
+
+    The IMF's "2025Q2" and an Indian source's "Q1 FY26" name the same three
+    months. A system that aligns periods by matching the digit after "Q" would
+    compare April-June against July-September and invent a contradiction.
+
+    Normalizing to intervals makes the two labels share an identity key, and
+    makes the naive pairing visibly wrong.
+    """
+    imf = parse_period("2025Q2")
+    indian = parse_period("Q1 FY26")
+    assert imf is not None and indian is not None
+
+    assert imf.key == indian.key, "same three months must normalize to one identity"
+
+    naive_string_match = parse_period("Q2 FY26")
+    assert naive_string_match is not None
+    assert naive_string_match.key != imf.key
+    assert not naive_string_match.overlaps(imf), "the naive pairing shares no days at all"
+
+
+def test_instants() -> None:
+    p = parse_period("as at March 31, 2024")
+    assert p is not None
+    assert p.kind == "instant"
+    assert p.start == p.end == date(2024, 3, 31)
+
+
+def test_assumed_conventions_are_flagged_not_hidden() -> None:
+    """A bare year needs a convention we cannot read off the string."""
+    bare_year = parse_period("2025")
+    assert bare_year is not None
+    assert bare_year.inferred is True
+
+    bare_span = parse_period("2024-25")
+    assert bare_span is not None
+    assert bare_span.inferred is True
+
+    explicit = parse_period("FY24")
+    assert explicit is not None
+    assert explicit.inferred is False
+
+
+def test_overlap_detection() -> None:
+    q4fy24 = parse_period("Q4 FY24")
+    fy24 = parse_period("FY24")
+    fy23 = parse_period("FY23")
+    assert q4fy24 is not None and fy24 is not None and fy23 is not None
+
+    assert q4fy24.overlaps(fy24), "a quarter falls inside its own fiscal year"
+    assert not q4fy24.overlaps(fy23)
+
+
+def test_unparseable_returns_none_rather_than_guessing() -> None:
+    assert parse_period("the current fiscal") is None
+    assert parse_period("") is None
+    assert parse_period(None) is None
