@@ -136,9 +136,27 @@ def values_agree(a: ComparableFact, b: ComparableFact) -> tuple[bool, float, flo
     return False, delta, step
 
 
+def _with_unit(value: str, unit: str) -> str:
+    """Append a unit unless the value already carries one.
+
+    Extractors often include the unit in the value -- "6.6 percent" rather than
+    "6.6" -- and appending blindly produced "6.6 percent %" in explanations
+    a reader is meant to trust.
+    """
+    value = (value or "").strip()
+    unit = (unit or "").strip()
+    if not unit:
+        return value
+    if unit.lower() in value.lower():
+        return value
+    if unit == "%" and re.search(r"per\s*cent|percent|%", value, re.IGNORECASE):
+        return value
+    return f"{value} {unit}"
+
+
 def _format(fact: ComparableFact) -> str:
     unit = "%" if fact.unit_class == "percent" else (fact.unit or "")
-    return f"{fact.value_raw}{(' ' + unit) if unit else ''}".strip()
+    return _with_unit(fact.value_raw, unit)
 
 
 def _written(fact: ComparableFact) -> str:
@@ -151,7 +169,7 @@ def _written(fact: ComparableFact) -> str:
     unit = (fact.unit_raw or "").strip()
     if not unit and fact.unit_class == "percent":
         unit = "%"
-    return f"{fact.value_raw} {unit}".strip()
+    return _with_unit(fact.value_raw, unit)
 
 
 def _qualifier_phrase(fact: ComparableFact, field: str) -> str:

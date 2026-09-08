@@ -79,6 +79,11 @@ def main() -> int:
     started = time.time()
     totals = {"stored": 0, "relations": 0, "grounded": 0, "ungrounded": 0, "repaired": 0}
 
+    # One client for the whole run: it remembers which keys have hit their daily
+    # cap, so a fresh one per document would rediscover that at the cost of a
+    # wasted request each time.
+    client = LLMClient()
+
     try:
         for path, pages, why in PLAN:
             if not path.exists():
@@ -90,7 +95,7 @@ def main() -> int:
             report = ingest_document(
                 path,
                 conn=conn,
-                client=LLMClient(),
+                client=client,
                 extract_model=config.EXTRACT_MODEL,
                 metadata_model=config.ADJUDICATE_MODEL or None,
                 pages=pages,
