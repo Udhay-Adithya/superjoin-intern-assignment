@@ -29,6 +29,7 @@ import hashlib
 import json
 import random
 import re
+import sys
 import threading
 import time
 from collections import deque
@@ -148,6 +149,13 @@ class TokenBudget:
         with self._lock:
             return int(self._observed_completion)
 
+    def headroom(self) -> float:
+        """Tokens still available in the trailing window, right now."""
+        with self._lock:
+            now = time.monotonic()
+            self._prune(now)
+            return self._tpm - sum(entry[1] for entry in self._window)
+
     def release(self, reservation: list[float]) -> None:
         """Give back a reservation for a request that never ran.
 
@@ -156,6 +164,21 @@ class TokenBudget:
         """
         with self._lock:
             reservation[1] = 0.0
+
+
+@dataclass
+class _Endpoint:
+    """One API key, with the quota that belongs to it.
+
+    Rate limits are per key, so a pool multiplies both the per-minute and the
+    per-day allowance. Each key therefore needs its own budget: sharing one
+    would throttle the pool to a single key's rate.
+    """
+
+    label: str
+    client: OpenAI
+    budget: TokenBudget
+    exhausted: bool = False
 
 
 @dataclass
@@ -180,21 +203,32 @@ class LLMClient:
         base_url: str | None = None,
         cache_enabled: bool | None = None,
     ) -> None:
-        self._client = OpenAI(
-            api_key=api_key or config.LLM_API_KEY,
-            base_url=base_url or config.LLM_BASE_URL,
-            timeout=REQUEST_TIMEOUT,
-            # This class does its own retrying with backoff; the SDK's default
-            # of 2 silently multiplies every timeout by three and makes a slow
-            # endpoint look like a hung one.
-            max_retries=0,
-        )
+        keys = [api_key] if api_key else list(config.LLM_API_KEYS)
+        if not keys:
+            keys = [""]
+
+        self._endpoints = [
+            _Endpoint(
+                label=f"key {index}",
+                client=OpenAI(
+                    api_key=key,
+                    base_url=base_url or config.LLM_BASE_URL,
+                    timeout=REQUEST_TIMEOUT,
+                    # This class does its own retrying with backoff; the SDK's
+                    # default of 2 silently multiplies every timeout by three
+                    # and makes a slow endpoint look like a hung one.
+                    max_retries=0,
+                ),
+                budget=TokenBudget(config.LLM_TPM_LIMIT, config.LLM_RPM_LIMIT),
+            )
+            for index, key in enumerate(keys, start=1)
+        ]
+        self._pool_lock = threading.Lock()
         self._cache_enabled = (
             config.LLM_CACHE_ENABLED if cache_enabled is None else cache_enabled
         )
         if self._cache_enabled:
             config.LLM_CACHE_DIR.mkdir(parents=True, exist_ok=True)
-        self._budget = TokenBudget(config.LLM_TPM_LIMIT, config.LLM_RPM_LIMIT)
 
     # --- caching ----------------------------------------------------------
 
@@ -217,6 +251,40 @@ class LLMClient:
             path.write_text(json.dumps(payload, ensure_ascii=False))
         except OSError:
             pass  # a cache miss is not worth failing an ingest over
+
+    # --- key pool ---------------------------------------------------------
+
+    def _pick_endpoint(self) -> _Endpoint | None:
+        """The live key with the most room right now, or None if all are spent.
+
+        Choosing by headroom spreads load without needing a round-robin cursor,
+        and naturally favours a key whose window has drained while another is
+        still waiting one out.
+        """
+        with self._pool_lock:
+            live = [e for e in self._endpoints if not e.exhausted]
+        if not live:
+            return None
+        return max(live, key=lambda e: e.budget.headroom())
+
+    def _retire(self, endpoint: _Endpoint, detail: str) -> None:
+        """Take a key out of the pool for the rest of the run."""
+        with self._pool_lock:
+            if endpoint.exhausted:
+                return
+            endpoint.exhausted = True
+            remaining = sum(1 for e in self._endpoints if not e.exhausted)
+        print(
+            f"  [llm] {endpoint.label} exhausted its daily quota ({detail}); "
+            f"{remaining} key(s) left",
+            file=sys.stderr,
+            flush=True,
+        )
+
+    @property
+    def live_keys(self) -> int:
+        with self._pool_lock:
+            return sum(1 for e in self._endpoints if not e.exhausted)
 
     # --- raw completion ---------------------------------------------------
 
@@ -259,28 +327,41 @@ class LLMClient:
             # below rather than failing the request.
             kwargs["reasoning_effort"] = config.REASONING_EFFORT
 
-        estimated = _estimate_tokens(
-            messages, max_tokens, self._budget.completion_estimate()
-        )
         last_error: Exception | None = None
         for attempt in range(MAX_ATTEMPTS):
-            reservation = self._budget.acquire(estimated)
+            endpoint = self._pick_endpoint()
+            if endpoint is None:
+                raise DailyQuotaExhausted(
+                    f"{model}: every key's daily quota is exhausted. Waiting will "
+                    f"not help within this run; add another key or resume "
+                    f"tomorrow. Work already done is cached and will not be "
+                    f"repeated."
+                )
+
+            estimated = _estimate_tokens(
+                messages, max_tokens, endpoint.budget.completion_estimate()
+            )
+            reservation = endpoint.budget.acquire(estimated)
+
             try:
-                response = self._client.chat.completions.create(**kwargs)
+                response = endpoint.client.chat.completions.create(**kwargs)
             except (RateLimitError, APIConnectionError) as exc:
-                self._budget.release(reservation)
+                endpoint.budget.release(reservation)
                 if _is_daily_quota(exc):
-                    raise DailyQuotaExhausted(
-                        f"{model}: daily token quota exhausted -- "
-                        f"{_quota_detail(exc)}. Waiting will not help within this "
-                        f"run; use another key or resume tomorrow. Work already "
-                        f"done is cached and will not be repeated."
-                    ) from exc
+                    # This key is done for the day, but the others may not be.
+                    # Retiring it rather than failing is the whole point of a
+                    # pool; the attempt is not counted against the retry budget
+                    # because no key was actually given a chance to answer.
+                    self._retire(endpoint, _quota_detail(exc))
+                    continue
                 last_error = exc
                 self._backoff(attempt, exc)
                 continue
             except APIStatusError as exc:
-                self._budget.release(reservation)
+                endpoint.budget.release(reservation)
+                if exc.status_code == 429 and _is_daily_quota(exc):
+                    self._retire(endpoint, _quota_detail(exc))
+                    continue
                 # 413 "request too large" is how some providers report a
                 # tokens-per-minute breach. It clears with time, so it is
                 # retryable rather than fatal.
@@ -301,15 +382,15 @@ class LLMClient:
             # nothing. Retry once with more room before giving up.
             if not text.strip() and choice.finish_reason == "length":
                 if response.usage:
-                    self._budget.settle(reservation, response.usage.total_tokens)
+                    endpoint.budget.settle(reservation, response.usage.total_tokens)
                 if kwargs["max_tokens"] < RETRY_MAX_TOKENS:
                     kwargs["max_tokens"] = RETRY_MAX_TOKENS
                     continue
                 raise LLMError(f"{model}: empty completion, budget exhausted by reasoning")
 
             if response.usage:
-                self._budget.settle(reservation, response.usage.total_tokens)
-                self._budget.observe_completion(response.usage.completion_tokens)
+                endpoint.budget.settle(reservation, response.usage.total_tokens)
+                endpoint.budget.observe_completion(response.usage.completion_tokens)
 
             payload = {
                 "text": text,

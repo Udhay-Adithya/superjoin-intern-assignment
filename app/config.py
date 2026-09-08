@@ -36,7 +36,15 @@ def _either(*keys: str, default: str = "") -> str:
     return default
 
 
-LLM_API_KEY = _either("LLM_API_KEY", "NIM_API_KEY")
+def _keys(raw: str) -> list[str]:
+    """Split a comma-separated key list, tolerating spaces and quotes."""
+    return [k.strip().strip("\"'") for k in raw.split(",") if k.strip().strip("\"'")]
+
+
+# One key or several. Each carries its own quota, so a pool multiplies both the
+# per-minute and the per-day allowance.
+LLM_API_KEYS = _keys(_either("LLM_API_KEY", "NIM_API_KEY"))
+LLM_API_KEY = LLM_API_KEYS[0] if LLM_API_KEYS else ""
 LLM_BASE_URL = _either(
     "LLM_BASE_URL", "NIM_BASE_URL", default="https://api.groq.com/openai/v1"
 )
