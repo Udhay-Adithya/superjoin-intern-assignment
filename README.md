@@ -32,6 +32,14 @@ cp .env.example .env      # then paste your key into LLM_API_KEY
 `.env.example` defaults to Groq (free tier, `openai/gpt-oss-120b`). Cerebras and
 NVIDIA NIM also work — set `LLM_BASE_URL` and the model names.
 
+`LLM_API_KEY` accepts several comma-separated keys. Rate limits are charged per
+key, so a pool multiplies both the per-minute and the per-day allowance, and
+each key is retired individually as it hits its daily cap:
+
+```
+LLM_API_KEY="gsk_first,gsk_second,gsk_third"
+```
+
 **Run the app:**
 
 ```bash
@@ -66,6 +74,107 @@ npm install --no-save typescript@5 && ./node_modules/.bin/tsc --watch
 ## Video Demo
 
 _TBD_
+
+---
+
+## The Four Required Cases
+
+Every block below is real output from `scripts/demo_corpus.py`, quoted from the
+starter documents. No verdict here was decided by a language model.
+
+### 1. A fact corroborated across documents, expressed differently
+
+```
+A  Delhivery annual report FY24 · p22
+   81,415.38 ₹ in Million   basis=consolidated  variant=operations
+   "Revenue from Operations   74,540.82   66,586.61   81,415.38   72,253.01"
+
+B  Delhivery Q4 FY24 earnings deck · p17
+   8,142 ₹ Cr               basis=unstated     variant=customers
+   "Revenue from customers (A+B)  1,860  2,194  2,076 ... 7,225  8,142  12.7%"
+
+→ Same quantity, written differently: 81,415.38 ₹ in Million and 8,142 ₹ Cr are
+  the same figure once scaled, for the same period, despite differing on variant.
+```
+
+Two documents, two units, two metric phrasings. They meet because the scale is
+normalized, the fiscal periods resolve to the same interval, and the qualifying
+tail (`operations` / `customers`) is lifted out of the metric into `variant` so
+both reduce to one measure.
+
+### 2. A genuine disagreement
+
+```
+A  Reserve Bank of India · p17
+   6.5 per cent    modality=projected   period=2025-26
+   "real GDP growth for 2025-26 is projected at 6.5 per cent, with risks"
+
+B  International Monetary Fund (2025-11-26) · p13
+   6.6 percent     modality=projected   period=FY2025/26
+   "real GDP growth is projected at 6.6 percent in FY2025/26, helped by the
+    strong 2025Q2 growth outturn, the GST reform..."
+
+→ Competing forecasts, not a contradiction: Reserve Bank of India projects 6.5 %
+  and International Monetary Fund (2025-11-26) projects 6.6 percent for the same
+  period. Forecasts differ by method and vintage.
+```
+
+Note what the system refuses to do: it does not pick a winner. Neither
+institution is wrong, because the year has not happened. `2025-26` and
+`FY2025/26` are recognised as the same interval despite different notation.
+
+The reviewer model agreed, at 0.97 confidence:
+
+> *Both sources quote projected real GDP growth for FY2025/26: RBI at 6.5% and
+> IMF at 6.6%. The evidence shows they are forecasts, not actuals, and the small
+> numeric difference is typical of differing projections, not a logical conflict.*
+
+### 3. An apparent contradiction explained by context
+
+```
+A  Delhivery annual report FY24 · p22
+   4,753.49 ₹ in Million    basis=standalone
+B  Delhivery annual report FY24 · p22
+   4,526.96 ₹ in Million    basis=consolidated
+   "Other Income   4,753.49   3,311.74   4,526.96   3,049.48"
+
+→ Not a contradiction: these measure different things.
+  4,753.49 INR is standalone while 4,526.96 INR is consolidated.
+```
+
+Same company, same metric, same year, different numbers. The two share a core
+key and diverge on `basis`, so the qualifier they differ on *is* the explanation.
+
+A second flavour, resolved by definition rather than scope:
+
+```
+A  300,000 Preference Shares of ₹10 each      variant=10
+B  4,660,337 Preference Shares of ₹100 each   variant=100
+
+→ Not a contradiction: these measure different things.
+```
+
+### 4. An extraction failure, and how it is handled
+
+```
+A  Delhivery Q4 deck · p17    13
+B  Delhivery Q4 deck · p17   109
+   "EBITDA   13   109   46   (58.0%)   242.5%   (452)   127"
+
+→ Same source passage, so not a document conflict: 13 and 109 were both read as
+  'ebitda'. They are different quantities whose distinguishing detail was lost
+  in extraction.
+```
+
+Those are quarterly columns the extractor failed to distinguish. The system will
+not claim a document contradicts itself inside one passage — if two figures from
+a single region share a full key and disagree, our metric resolution collapsed
+two different things, and it says so rather than blaming the document.
+
+This rule was written because of two earlier false contradictions it now catches:
+a before/after pair in one sentence ("increasing it from ₹8,703.00 million to
+₹8,863.03 million"), and the two preference-share classes above, which are now
+correctly separated by `variant` instead.
 
 ---
 
@@ -282,11 +391,12 @@ like `2017-23`, table line-wrap artifacts) with no false rejections.
 
 | | |
 |---|---|
-| Facts extracted | 298 |
+| Documents / pages | 5 / 411 |
+| Facts extracted | 351 |
 | Relations found | 61 |
-| Grounding rejection rate | **0.00%** |
-| Rebuild from cache | 8s |
-| Tests | 129 |
+| Grounding rejection rate | **0.56%** |
+| Rebuild from cache | 3s |
+| Tests | 138 |
 
 Verdict breakdown:
 
@@ -294,8 +404,9 @@ Verdict breakdown:
 corroborates  agrees_despite_differing_qualifiers  17
 reconciled    different_basis                      14
 reconciled    different_variant                    12
-reconciled    metric_label_collision                8
+reconciled    metric_label_collision                7
 corroborates  within_implied_precision              4
+reconciled    differing_forecast                    1
 ```
 
 The first live extraction rejected **77%** of facts. The model was assembling
