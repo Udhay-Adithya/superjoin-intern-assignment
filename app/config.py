@@ -62,7 +62,7 @@ LLM_TPM_LIMIT = _int("LLM_TPM_LIMIT", 8000)
 LLM_RPM_LIMIT = _int("LLM_RPM_LIMIT", 1000)
 
 # Concurrency is bounded by the token budget, not by CPU.
-LLM_WORKERS = _int("LLM_WORKERS", 4)
+LLM_WORKERS = _int("LLM_WORKERS", 2)
 
 # Backwards-compatible aliases.
 NIM_API_KEY = LLM_API_KEY

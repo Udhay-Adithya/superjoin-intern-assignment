@@ -130,3 +130,27 @@ def test_backoff_prefers_the_providers_stated_delay() -> None:
         response = None
 
     assert LLMClient._retry_after(NoHeaders()) is None
+
+
+def test_reservations_learn_from_real_usage() -> None:
+    """Under-reserving is what caused repeated 429s in a live run.
+
+    Several workers each reserved well under what their request truly cost,
+    burst past the per-minute quota together, and then lost a minute to backing
+    off. The allowance is measured rather than assumed.
+    """
+    budget = TokenBudget(tokens_per_minute=8000, requests_per_minute=1000)
+    start = budget.completion_estimate()
+
+    for _ in range(10):
+        budget.observe_completion(5000)
+
+    assert budget.completion_estimate() > start
+    assert budget.completion_estimate() <= 5000
+
+
+def test_a_zero_completion_does_not_drag_the_estimate_down() -> None:
+    budget = TokenBudget(tokens_per_minute=8000, requests_per_minute=1000)
+    before = budget.completion_estimate()
+    budget.observe_completion(0)
+    assert budget.completion_estimate() == before

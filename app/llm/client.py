@@ -48,6 +48,9 @@ REQUEST_TIMEOUT = 600.0
 # Longer than the 60-second window a per-minute quota resets on.
 MAX_BACKOFF = 75.0
 
+# Starting guess for completion size, before any real usage is seen.
+DEFAULT_COMPLETION_ESTIMATE = 2500
+
 
 class LLMError(RuntimeError):
     """Raised when a completion could not be obtained or parsed."""
@@ -79,6 +82,11 @@ class TokenBudget:
         # thread's overage be charged to another thread's request.
         self._window: deque[list[float]] = deque()
         self._lock = threading.Lock()
+        # Reservations start from a guess and converge on what requests really
+        # cost. Guessing low is what produced repeated 429s: several workers
+        # would each reserve well under their true usage, burst past the quota
+        # together, and then spend a minute backing off.
+        self._observed_completion = float(DEFAULT_COMPLETION_ESTIMATE)
 
     def _prune(self, now: float) -> None:
         cutoff = now - self._window_seconds
@@ -113,6 +121,21 @@ class TokenBudget:
         """Replace an estimate with the real cost, once the API reports it."""
         with self._lock:
             reservation[1] = float(max(0, min(actual_tokens, self._tpm)))
+
+    def observe_completion(self, completion_tokens: int) -> None:
+        """Fold a real completion size into the running estimate."""
+        if completion_tokens <= 0:
+            return
+        with self._lock:
+            # Weighted towards recent history so the estimate tracks the kind of
+            # work currently being done rather than the whole run's average.
+            self._observed_completion = (
+                0.7 * self._observed_completion + 0.3 * float(completion_tokens)
+            )
+
+    def completion_estimate(self) -> int:
+        with self._lock:
+            return int(self._observed_completion)
 
     def release(self, reservation: list[float]) -> None:
         """Give back a reservation for a request that never ran.
@@ -225,7 +248,9 @@ class LLMClient:
             # below rather than failing the request.
             kwargs["reasoning_effort"] = config.REASONING_EFFORT
 
-        estimated = _estimate_tokens(messages, max_tokens)
+        estimated = _estimate_tokens(
+            messages, max_tokens, self._budget.completion_estimate()
+        )
         last_error: Exception | None = None
         for attempt in range(MAX_ATTEMPTS):
             reservation = self._budget.acquire(estimated)
@@ -271,6 +296,7 @@ class LLMClient:
 
             if response.usage:
                 self._budget.settle(reservation, response.usage.total_tokens)
+                self._budget.observe_completion(response.usage.completion_tokens)
 
             payload = {
                 "text": text,
@@ -396,19 +422,20 @@ def _drop_unsupported(kwargs: dict[str, Any], message: str) -> bool:
     return False
 
 
-def _estimate_tokens(messages: Sequence[dict], max_tokens: int) -> int:
-    """Rough budget reservation: prompt size plus a modest output allowance.
+def _estimate_tokens(
+    messages: Sequence[dict], max_tokens: int, completion_estimate: int
+) -> int:
+    """Budget reservation: prompt size plus what completions actually cost.
 
-    Deliberately not exact. Reserving the full ``max_tokens`` would throttle to
-    a fraction of the real limit, since extractions rarely use their whole
-    budget; the reservation is corrected from reported usage once known.
+    Reserving the full ``max_tokens`` would throttle throughput to a fraction of
+    the real limit, since an extraction rarely uses its whole ceiling. Reserving
+    a fixed small allowance was the opposite mistake -- it under-reserved, so
+    workers burst past the quota together and lost a minute to backing off.
+    The allowance is therefore measured rather than assumed.
     """
     prompt_chars = sum(len(str(m.get("content", ""))) for m in messages)
-    # The output allowance is capped well below max_tokens on purpose: an
-    # extraction rarely uses its whole ceiling, and reserving the ceiling would
-    # throttle throughput to a fraction of the real limit. The reservation is
-    # corrected from reported usage as soon as the call returns.
-    return int(prompt_chars / 3.5) + min(max_tokens, 1500)
+    allowance = min(max(completion_estimate, DEFAULT_COMPLETION_ESTIMATE), max_tokens)
+    return int(prompt_chars / 3.5) + allowance
 
 
 def _loads(text: str) -> Any:
