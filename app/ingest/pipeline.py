@@ -14,8 +14,8 @@ import sqlite3
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from app import db
-from app.extract.extractor import extract_region
+from app import config, db
+from app.extract.extractor import UNUSABLE_REASONS, extract_region
 from app.ingest.metadata import DocumentMetadata, extract_metadata
 from app.ingest.parse import ParsedDoc, bboxes_for_span, parse_pdf
 from app.ingest.segment import Region, segment_document, _numeric_token_count
@@ -41,6 +41,9 @@ class IngestReport:
     n_regions_extracted: int = 0
     n_candidates: int = 0
     n_grounded: int = 0
+    n_ungrounded: int = 0
+    n_unusable: int = 0
+    n_repaired: int = 0
     n_stored: int = 0
     n_relations: int = 0
     rejections: dict[str, int] = field(default_factory=dict)
@@ -48,9 +51,17 @@ class IngestReport:
 
     @property
     def grounding_rejection_rate(self) -> float:
-        if not self.n_candidates:
-            return 0.0
-        return 1.0 - (self.n_grounded / self.n_candidates)
+        """Share of well-formed claims whose evidence did not verify.
+
+        Rows the model never produced properly are excluded: they measure its
+        formatting, not whether it invents evidence.
+        """
+        checked = self.n_grounded + self.n_ungrounded
+        return self.n_ungrounded / checked if checked else 0.0
+
+    @property
+    def repair_rate(self) -> float:
+        return self.n_repaired / self.n_grounded if self.n_grounded else 0.0
 
     def note(self, reason: str) -> None:
         self.rejections[reason] = self.rejections.get(reason, 0) + 1
@@ -77,7 +88,7 @@ def ingest_document(
     client: LLMClient,
     extract_model: str,
     metadata_model: str | None = None,
-    workers: int = 8,
+    workers: int | None = None,
     max_regions: int | None = None,
     pages: tuple[int, int] | None = None,
 ) -> IngestReport:
@@ -89,6 +100,7 @@ def ingest_document(
     paying to re-extract a hundred pages.
     """
     path = Path(path)
+    workers = workers if workers is not None else config.LLM_WORKERS
     parsed = parse_pdf(path)
 
     existing = conn.execute(
@@ -175,12 +187,15 @@ def ingest_document(
         block_id = block_ids[ordinal]
         report.n_candidates += len(result.facts) + len(result.rejected)
         report.n_grounded += len(result.facts)
+        report.n_ungrounded += len(result.ungrounded)
+        report.n_unusable += len(result.unusable)
+        report.n_repaired += result.n_repaired
 
         for reason, detail in result.rejected:
             report.note(reason)
             db.record_failure(
                 conn,
-                stage="ground" if "quote" in reason or "evidence" in reason else "extract",
+                stage="extract" if reason in UNUSABLE_REASONS else "ground",
                 reason=reason,
                 doc_id=doc_id,
                 block_id=block_id,

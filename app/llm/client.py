@@ -1,21 +1,25 @@
 """LLM access, kept deliberately thin and provider-agnostic.
 
-Backed by NVIDIA NIM's OpenAI-compatible endpoint, but nothing above this module
-knows that. Three behaviours here were driven by measurement rather than by the
-documentation:
+Any OpenAI-compatible endpoint works -- Groq, Cerebras, NVIDIA NIM -- and
+nothing above this module knows which is in use. Four behaviours here came from
+measuring real providers rather than reading their documentation:
 
-1. ``nvext.guided_json`` -- NVIDIA's documented structured-output extension -- is
-   rejected by the hosted endpoint (it exists for self-hosted NIM containers).
-   So the strategy chain starts at OpenAI-style ``response_format`` and falls
-   back to prompting plus a repair retry.
+1. Structured output is negotiated, not assumed. NVIDIA's documented
+   ``nvext.guided_json`` extension is rejected by its own hosted endpoint (it
+   exists only for self-hosted containers), so the chain starts at OpenAI-style
+   ``response_format`` and degrades to prompting plus a repair retry. A provider
+   that rejects an optional parameter has it dropped and the call retried.
 
-2. Several catalogue models are reasoning models that emit ``reasoning_content``
-   before ``content``, and that reasoning is charged against ``max_tokens``. A
-   budget sized for the answer alone returns an empty string with
-   ``finish_reason='length'`` and no error. Budgets here are therefore generous,
-   and an empty completion is retried with a larger one.
+2. Reasoning models emit their thinking before their answer and charge it
+   against ``max_tokens``. A budget sized for the answer alone returns an empty
+   string with ``finish_reason='length'`` and no error at all. Budgets are
+   therefore generous, and an empty completion is retried with more room.
 
-3. Responses are cached on a content hash, so re-running the corpus after a
+3. The SDK's default of two internal retries silently triples every timeout and
+   makes a slow endpoint indistinguishable from a hung one. Retrying is done
+   here instead, with backoff.
+
+4. Responses are cached on a content hash, so re-running the corpus after a
    change to non-LLM code costs nothing.
 """
 
@@ -24,7 +28,9 @@ from __future__ import annotations
 import hashlib
 import json
 import random
+import threading
 import time
+from collections import deque
 from collections.abc import Callable, Iterable, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
@@ -45,6 +51,55 @@ REQUEST_TIMEOUT = 600.0
 
 class LLMError(RuntimeError):
     """Raised when a completion could not be obtained or parsed."""
+
+
+class TokenBudget:
+    """Client-side sliding-window rate limit, shared across worker threads.
+
+    Hosted endpoints meter tokens per minute, not requests, and exceeding the
+    budget returns 413 or 429 rather than queueing. Groq's free tier allows
+    8,000 tokens per minute against 1,000 requests, so tokens bind long before
+    requests do and eight parallel extractions breach it immediately.
+
+    Waiting here is strictly better than being rejected there: a refused request
+    still costs a round trip and loses whatever the model had already generated.
+    """
+
+    def __init__(self, tokens_per_minute: int, requests_per_minute: int) -> None:
+        self._tpm = max(1, tokens_per_minute)
+        self._rpm = max(1, requests_per_minute)
+        self._window: deque[tuple[float, int]] = deque()
+        self._lock = threading.Lock()
+
+    def _prune(self, now: float) -> None:
+        cutoff = now - 60.0
+        while self._window and self._window[0][0] < cutoff:
+            self._window.popleft()
+
+    def acquire(self, estimated_tokens: int) -> None:
+        """Block until this request fits inside the trailing minute."""
+        estimated = max(1, min(estimated_tokens, self._tpm))
+        while True:
+            with self._lock:
+                now = time.monotonic()
+                self._prune(now)
+                used = sum(tokens for _, tokens in self._window)
+                if used + estimated <= self._tpm and len(self._window) < self._rpm:
+                    self._window.append((now, estimated))
+                    return
+                oldest = self._window[0][0] if self._window else now
+            # Sleep only until the oldest entry leaves the window.
+            time.sleep(max(0.05, 60.0 - (time.monotonic() - oldest)))
+
+    def settle(self, estimated_tokens: int, actual_tokens: int) -> None:
+        """Correct the reservation once the true cost is known."""
+        delta = actual_tokens - max(1, min(estimated_tokens, self._tpm))
+        if not delta:
+            return
+        with self._lock:
+            if self._window:
+                timestamp, reserved = self._window[-1]
+                self._window[-1] = (timestamp, max(0, reserved + delta))
 
 
 @dataclass
@@ -83,6 +138,7 @@ class LLMClient:
         )
         if self._cache_enabled:
             config.LLM_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+        self._budget = TokenBudget(config.LLM_TPM_LIMIT, config.LLM_RPM_LIMIT)
 
     # --- caching ----------------------------------------------------------
 
@@ -147,8 +203,10 @@ class LLMClient:
             # below rather than failing the request.
             kwargs["reasoning_effort"] = config.REASONING_EFFORT
 
+        estimated = _estimate_tokens(messages, max_tokens)
         last_error: Exception | None = None
         for attempt in range(MAX_ATTEMPTS):
+            self._budget.acquire(estimated)
             try:
                 response = self._client.chat.completions.create(**kwargs)
             except (RateLimitError, APIConnectionError) as exc:
@@ -156,7 +214,10 @@ class LLMClient:
                 self._backoff(attempt)
                 continue
             except APIStatusError as exc:
-                if exc.status_code >= 500:
+                # 413 "request too large" is how some providers report a
+                # tokens-per-minute breach. It clears with time, so it is
+                # retryable rather than fatal.
+                if exc.status_code in (408, 413, 429) or exc.status_code >= 500:
                     last_error = exc
                     self._backoff(attempt)
                     continue
@@ -176,6 +237,9 @@ class LLMClient:
                     kwargs["max_tokens"] = RETRY_MAX_TOKENS
                     continue
                 raise LLMError(f"{model}: empty completion, budget exhausted by reasoning")
+
+            if response.usage:
+                self._budget.settle(estimated, response.usage.total_tokens)
 
             payload = {
                 "text": text,
@@ -206,7 +270,7 @@ class LLMClient:
         schema: dict,
         schema_name: str = "result",
         max_tokens: int = DEFAULT_MAX_TOKENS,
-    ) -> dict:
+    ) -> Any:
         """Return a JSON object, trying the most reliable mechanism available.
 
         Order: OpenAI-style ``response_format`` -> plain prompting -> a repair
@@ -234,7 +298,7 @@ class LLMClient:
 
     def _repair(
         self, messages: Sequence[dict], broken: str, error: str, *, model: str, max_tokens: int
-    ) -> dict:
+    ) -> Any:
         repair_messages = [
             *messages,
             {"role": "assistant", "content": broken[:4000]},
@@ -274,22 +338,48 @@ def _drop_unsupported(kwargs: dict[str, Any], message: str) -> bool:
     return False
 
 
-def _loads(text: str) -> dict:
-    """Parse JSON, tolerating code fences and surrounding prose."""
+def _estimate_tokens(messages: Sequence[dict], max_tokens: int) -> int:
+    """Rough budget reservation: prompt size plus a modest output allowance.
+
+    Deliberately not exact. Reserving the full ``max_tokens`` would throttle to
+    a fraction of the real limit, since extractions rarely use their whole
+    budget; the reservation is corrected from reported usage once known.
+    """
+    prompt_chars = sum(len(str(m.get("content", ""))) for m in messages)
+    return int(prompt_chars / 3.5) + min(max_tokens, 1500)
+
+
+def _loads(text: str) -> Any:
+    """Parse JSON, tolerating code fences and surrounding prose.
+
+    Returns whatever the model produced -- an object or a bare array. Callers
+    decide what shape they expect, because models honour a requested wrapper
+    inconsistently even under a strict schema.
+    """
     stripped = text.strip()
     if stripped.startswith("```"):
-        stripped = stripped.split("```")[1]
-        if stripped.startswith("json"):
-            stripped = stripped[4:]
-        stripped = stripped.strip()
+        parts = stripped.split("```")
+        if len(parts) > 1:
+            stripped = parts[1]
+            if stripped.startswith("json"):
+                stripped = stripped[4:]
+            stripped = stripped.strip()
 
     try:
         return json.loads(stripped)
     except json.JSONDecodeError:
-        start, end = stripped.find("{"), stripped.rfind("}")
-        if start == -1 or end <= start:
-            raise
-        return json.loads(stripped[start : end + 1])
+        pass
+
+    # Fall back to the outermost object or array embedded in the text.
+    for opener, closer in (("{", "}"), ("[", "]")):
+        start, end = stripped.find(opener), stripped.rfind(closer)
+        if start != -1 and end > start:
+            try:
+                return json.loads(stripped[start : end + 1])
+            except json.JSONDecodeError:
+                continue
+
+    raise json.JSONDecodeError("no json object or array found", stripped, 0)
 
 
 def map_concurrent(

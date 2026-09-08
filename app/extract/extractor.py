@@ -175,6 +175,12 @@ class CandidateFact:
         )
 
 
+# Rejections that mean the model produced an unusable row, as opposed to a
+# usable claim whose evidence did not hold up. Conflating the two makes the
+# grounding rate say more about the model's formatting than about its honesty.
+UNUSABLE_REASONS = frozenset({"llm_error", "malformed", "incomplete"})
+
+
 @dataclass
 class ExtractionResult:
     """Grounded facts plus every rejection, so the failure rate is reportable."""
@@ -183,9 +189,25 @@ class ExtractionResult:
     rejected: list[tuple[str, str]] = field(default_factory=list)  # (reason, detail)
 
     @property
+    def unusable(self) -> list[tuple[str, str]]:
+        """Rows the model never produced properly -- not a grounding outcome."""
+        return [r for r in self.rejected if r[0] in UNUSABLE_REASONS]
+
+    @property
+    def ungrounded(self) -> list[tuple[str, str]]:
+        """Well-formed claims whose evidence could not be verified."""
+        return [r for r in self.rejected if r[0] not in UNUSABLE_REASONS]
+
+    @property
     def grounding_rejection_rate(self) -> float:
-        total = len(self.facts) + len(self.rejected)
-        return len(self.rejected) / total if total else 0.0
+        """Share of well-formed claims that failed the grounding gate.
+
+        Measured only over rows that were usable in the first place, so it
+        reports how often the model invents evidence rather than how often it
+        returns a malformed row.
+        """
+        checked = len(self.facts) + len(self.ungrounded)
+        return len(self.ungrounded) / checked if checked else 0.0
 
     @property
     def n_repaired(self) -> int:
@@ -219,7 +241,17 @@ def extract_region(
         result.rejected.append(("llm_error", str(exc)))
         return result
 
-    for raw in payload.get("facts", []):
+    # Models honour the wrapper object inconsistently: the same prompt can come
+    # back as {"facts": [...]} or as a bare array. Both mean the same thing.
+    if isinstance(payload, dict):
+        items = payload.get("facts") or payload.get("results") or []
+    elif isinstance(payload, list):
+        items = payload
+    else:
+        result.rejected.append(("malformed", f"unexpected payload {type(payload).__name__}"))
+        return result
+
+    for raw in items:
         if not isinstance(raw, dict):
             result.rejected.append(("malformed", repr(raw)[:200]))
             continue

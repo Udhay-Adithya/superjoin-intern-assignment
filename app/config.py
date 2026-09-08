@@ -47,6 +47,23 @@ ADJUDICATE_MODEL = _either("LLM_ADJUDICATE_MODEL", "NIM_ADJUDICATE_MODEL")
 # appears and are charged against max_tokens. Empty means "send nothing".
 REASONING_EFFORT = os.getenv("LLM_REASONING_EFFORT", "").strip()
 
+
+def _int(env_key: str, default: int) -> int:
+    try:
+        return int(os.getenv(env_key, "") or default)
+    except ValueError:
+        return default
+
+
+# Hosted endpoints meter tokens per minute. Groq's free tier allows 8,000 TPM
+# against 1,000 RPM, so tokens bind long before requests do. Staying under the
+# limit locally beats being rejected remotely.
+LLM_TPM_LIMIT = _int("LLM_TPM_LIMIT", 8000)
+LLM_RPM_LIMIT = _int("LLM_RPM_LIMIT", 1000)
+
+# Concurrency is bounded by the token budget, not by CPU.
+LLM_WORKERS = _int("LLM_WORKERS", 4)
+
 # Backwards-compatible aliases.
 NIM_API_KEY = LLM_API_KEY
 NIM_BASE_URL = LLM_BASE_URL
