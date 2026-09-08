@@ -18,7 +18,7 @@ from __future__ import annotations
 import json
 import sys
 import time
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -146,29 +146,41 @@ def probe(model: str, excerpt: str) -> dict:
     }
 
 
+def _row(r: dict) -> str:
+    if "error" in r:
+        return f"{r['model']:42s}  ERROR  {r['error']}"
+    basis = f"{int(r['consolidated_ok']) + int(r['standalone_ok'])}/2"
+    return (
+        f"{r['model']:42s} {r['seconds']:6.1f} {r['n_facts']:6d} {basis:>6s} "
+        f"{'yes' if r['unit_ok'] else 'no':>5s} {r['grounded']:>9s}"
+    )
+
+
+HEADER = f"{'model':42s} {'secs':>6s} {'facts':>6s} {'basis':>6s} {'unit':>5s} {'grounded':>9s}"
+
+
 def main() -> None:
     models = sys.argv[1:] or CANDIDATES
     excerpt = load_region()
-    print(f"region: {len(excerpt)} chars\nprobing {len(models)} models concurrently...\n")
+    print(f"region: {len(excerpt)} chars\nprobing {len(models)} models concurrently...\n", flush=True)
+    print(HEADER, flush=True)
+    print("-" * len(HEADER), flush=True)
 
+    results: list[dict] = []
     with ThreadPoolExecutor(max_workers=len(models)) as pool:
-        results = list(pool.map(lambda m: probe(m, excerpt), models))
+        futures = {pool.submit(probe, m, excerpt): m for m in models}
+        for future in as_completed(futures):
+            result = future.result()
+            results.append(result)
+            # Print as each finishes -- a slow model must not hide the fast ones.
+            print(_row(result), flush=True)
 
+    print("\n--- ranked ---", flush=True)
     ok = [r for r in results if "error" not in r]
     ok.sort(key=lambda r: (-(r["consolidated_ok"] + r["standalone_ok"]), r["seconds"]))
-
-    header = f"{'model':42s} {'secs':>6s} {'facts':>6s} {'basis':>6s} {'unit':>5s} {'grounded':>9s}"
-    print(header)
-    print("-" * len(header))
+    print(HEADER)
     for r in ok:
-        basis = f"{int(r['consolidated_ok']) + int(r['standalone_ok'])}/2"
-        print(
-            f"{r['model']:42s} {r['seconds']:6.1f} {r['n_facts']:6d} {basis:>6s} "
-            f"{'yes' if r['unit_ok'] else 'no':>5s} {r['grounded']:>9s}"
-        )
-    for r in results:
-        if "error" in r:
-            print(f"{r['model']:42s}  ERROR  {r['error']}")
+        print(_row(r))
 
 
 if __name__ == "__main__":
