@@ -126,3 +126,22 @@ def test_unparseable_returns_none_rather_than_guessing() -> None:
     assert parse_period("the current fiscal") is None
     assert parse_period("") is None
     assert parse_period(None) is None
+
+
+def test_non_consecutive_spans_are_rejected() -> None:
+    """Found by scanning the corpus, not by imagination.
+
+    The FY24 annual report contains 21 URL path segments of the form
+    ``.../uploads/2023/04/...``. Read as a fiscal span that becomes a year
+    ending in 2104. A fiscal span covers two consecutive years; enforcing that
+    rejects the URL fragment without needing to know it is a URL.
+    """
+    assert parse_period("2023/04") is None
+    assert parse_period("2019/07") is None
+
+    # genuine consecutive spans still parse, including the century rollover
+    assert parse_period("2024-25") is not None
+    assert parse_period("FY2025/26") is not None
+    rollover = parse_period("1999-00")
+    assert rollover is not None
+    assert rollover.end == date(2000, 3, 31)

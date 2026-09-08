@@ -146,6 +146,11 @@ _PATTERNS: list[tuple[re.Pattern[str], str]] = [
 ]
 
 
+# Kinds whose validity check is authoritative: if they match and then fail, the
+# text is not a period at all and no looser pattern may reinterpret it.
+_HARD_REJECT_KINDS = frozenset({"fiscal_span", "bare_fiscal_span"})
+
+
 def parse_period(text: str | None) -> Period | None:
     """Parse the first period label found in ``text``.
 
@@ -163,6 +168,12 @@ def parse_period(text: str | None) -> Period | None:
         period = _build(kind, m, raw)
         if period is not None:
             return period
+        if kind in _HARD_REJECT_KINDS:
+            # The text matched a specific convention and failed its validity
+            # check. Falling through would let a looser pattern reinterpret the
+            # same characters -- "2023/04" would come back as calendar year
+            # 2023 having just been rejected as a fiscal span.
+            return None
     return None
 
 
@@ -180,6 +191,8 @@ def _build(kind: str, m: re.Match[str], raw: str) -> Period | None:
     if kind == "fiscal_span":
         # FY2023-24 and FY2025/26 are both named by the year they end in.
         end_year = _span_end_year(int(m.group(1)), m.group(2))
+        if end_year is None:
+            return None
         start, end = fiscal_year(end_year)
         return Period(start, end, KIND_FISCAL_YEAR, raw)
 
@@ -218,6 +231,8 @@ def _build(kind: str, m: re.Match[str], raw: str) -> Period | None:
         # ending March 2025. Marked inferred: the convention is read from
         # context, not from the string.
         end_year = _span_end_year(int(m.group(1)), m.group(2))
+        if end_year is None:
+            return None
         start, end = fiscal_year(end_year)
         return Period(start, end, KIND_FISCAL_YEAR, raw, inferred=True)
 
@@ -241,13 +256,24 @@ def _build(kind: str, m: re.Match[str], raw: str) -> Period | None:
     return None
 
 
-def _span_end_year(first: int, second_raw: str) -> int:
-    """Resolve the closing year of a span like 2023-24, 2025/26 or 2024-2025."""
+def _span_end_year(first: int, second_raw: str) -> int | None:
+    """Resolve the closing year of a span like 2023-24, 2025/26 or 2024-2025.
+
+    A fiscal span always covers two *consecutive* years, and enforcing that is
+    what rejects things that merely look like spans. The corpus contains 21
+    occurrences of ``2023/04`` -- a URL path segment, ``uploads/2023/04/`` --
+    which without this check parsed as a fiscal year ending in 2104.
+
+    Returns ``None`` when the two years are not consecutive.
+    """
     second = int(second_raw)
+
     if len(second_raw) == 4:
-        return second
-    century = (first // 100) * 100
-    end_year = century + second
-    if end_year < first:  # 1999-00 style rollover
-        end_year += 100
-    return end_year
+        end_year = second
+    else:
+        century = (first // 100) * 100
+        end_year = century + second
+        if end_year < first:  # 1999-00 rolls over into the next century
+            end_year += 100
+
+    return end_year if end_year == first + 1 else None
