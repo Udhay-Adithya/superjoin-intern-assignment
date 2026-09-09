@@ -1,3 +1,10 @@
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/superjoin-dark.svg">
+    <img src="assets/superjoin.svg" alt="Superjoin" width="260">
+  </picture>
+</p>
+
 # Fact Knowledge Layer
 
 Extracts facts from PDFs, ties every fact to the text that supports it, and works
