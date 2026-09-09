@@ -79,7 +79,10 @@ npm install --no-save typescript@5 && ./node_modules/.bin/tsc --watch
 
 ## Video Demo
 
-_TBD_
+<https://drive.google.com/drive/folders/1HjfbcAkUUFWzfZeU0eg-M8iYup-sdrxh?usp=sharing>
+
+A walkthrough of a PDF being ingested and the four required cases, each shown
+with its evidence and the rule that produced the verdict.
 
 ---
 
