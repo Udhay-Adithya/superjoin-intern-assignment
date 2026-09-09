@@ -46,6 +46,12 @@ LLM_API_KEY="gsk_first,gsk_second,gsk_third"
 .venv/bin/uvicorn app.main:app --port 8000
 ```
 
+Ingestion runs in a background thread and the browser polls a job id for it, so
+avoid `--reload` here: the ingest writes cache files, the reloader notices them
+and restarts, and the upload is cut off mid-run. Job state itself is stored in
+the database rather than in memory, so a restart no longer loses the job — it
+reports the interruption instead of returning a 404 for a job that exists.
+
 Open <http://localhost:8000>. Upload a PDF from the Upload tab, or build the
 demo knowledge layer first:
 

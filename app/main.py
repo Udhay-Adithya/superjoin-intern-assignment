@@ -7,6 +7,8 @@ import shutil
 import sqlite3
 import threading
 import uuid
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
@@ -21,13 +23,46 @@ from app.llm.client import LLMClient
 
 WEB_DIR = Path(__file__).resolve().parent / "web"
 
-app = FastAPI(title="Fact Knowledge Layer")
+def _abandon_orphaned_jobs() -> None:
+    """Fail jobs whose worker died with the previous process.
+
+    Job state outlives the process but the thread doing the work does not, so a
+    job left mid-flight by a restart would otherwise sit at "running" forever
+    and the UI would poll it indefinitely.
+    """
+    conn = get_conn()
+    try:
+        conn.execute(
+            "UPDATE jobs SET status = 'failed', "
+            "detail = 'interrupted by a server restart; upload again', "
+            "updated_at = datetime('now') "
+            "WHERE status IN ('queued', 'running')"
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+@asynccontextmanager
+async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+    _abandon_orphaned_jobs()
+    yield
+
+
+app = FastAPI(title="Fact Knowledge Layer", lifespan=lifespan)
 
 
 # --- job tracking ----------------------------------------------------------
-# Ingestion takes minutes on a rate-limited endpoint, which is far longer than a
-# request should hold a connection open. Uploads therefore return a job id and
-# the UI polls it.
+# Ingestion takes minutes on a rate-limited endpoint, far longer than a request
+# should hold a connection open, so an upload returns a job id that the UI
+# polls.
+#
+# Job state lives in the database rather than in a module-level dict. In memory
+# it broke as soon as the process that created a job was not the process
+# answering the poll: `uvicorn --reload` restarts when the ingest writes its
+# cache files, and `--workers N` gives every worker its own dict. Both return a
+# 404 for a job that really exists, which looks like a missing endpoint and is
+# not.
 
 
 @dataclass
@@ -39,13 +74,41 @@ class Job:
     report: dict[str, Any] = field(default_factory=dict)
 
 
-_jobs: dict[str, Job] = {}
-_jobs_lock = threading.Lock()
+def _save_job(job: Job) -> None:
+    conn = get_conn()
+    try:
+        conn.execute(
+            "INSERT INTO jobs (id, filename, status, detail, report_json) "
+            "VALUES (?,?,?,?,?) "
+            "ON CONFLICT(id) DO UPDATE SET status=excluded.status, "
+            "detail=excluded.detail, report_json=excluded.report_json, "
+            "updated_at=datetime('now')",
+            (job.id, job.filename, job.status, job.detail, json.dumps(job.report)),
+        )
+        conn.commit()
+    finally:
+        conn.close()
 
 
-def _set_job(job: Job) -> None:
-    with _jobs_lock:
-        _jobs[job.id] = job
+def _load_job(job_id: str) -> Job | None:
+    conn = get_conn()
+    try:
+        row = conn.execute("SELECT * FROM jobs WHERE id = ?", (job_id,)).fetchone()
+    finally:
+        conn.close()
+    if row is None:
+        return None
+    try:
+        report = json.loads(row["report_json"])
+    except json.JSONDecodeError:
+        report = {}
+    return Job(
+        id=row["id"],
+        filename=row["filename"],
+        status=row["status"],
+        detail=row["detail"],
+        report=report,
+    )
 
 
 # --- helpers ---------------------------------------------------------------
@@ -114,14 +177,14 @@ async def upload_document(file: UploadFile) -> dict:
         shutil.copyfileobj(file.file, out)
 
     job = Job(id=uuid.uuid4().hex[:12], filename=file.filename)
-    _set_job(job)
+    _save_job(job)
     threading.Thread(target=_run_ingest, args=(job, destination), daemon=True).start()
     return {"job_id": job.id, "filename": job.filename, "status": job.status}
 
 
 def _run_ingest(job: Job, path: Path) -> None:
     job.status = "running"
-    _set_job(job)
+    _save_job(job)
     conn = get_conn()
     try:
         report = ingest_document(
@@ -141,13 +204,12 @@ def _run_ingest(job: Job, path: Path) -> None:
         job.detail = f"{type(exc).__name__}: {exc}"
     finally:
         conn.close()
-        _set_job(job)
+        _save_job(job)
 
 
 @app.get("/api/jobs/{job_id}")
 def get_job(job_id: str) -> dict:
-    with _jobs_lock:
-        job = _jobs.get(job_id)
+    job = _load_job(job_id)
     if job is None:
         raise HTTPException(status_code=404, detail="unknown job")
     return asdict(job)

@@ -264,3 +264,37 @@ def test_repeating_an_already_read_range_is_still_a_no_op(conn, report_path) -> 
     _ingest(conn, report_path, StubClient(), pages=(20, 24))
     again = _ingest(conn, report_path, StubClient(), pages=(20, 24))
     assert again.already_ingested
+
+
+# --- upload jobs -------------------------------------------------------
+
+
+def test_upload_job_state_survives_a_restart(tmp_path, monkeypatch) -> None:
+    """A 404 on a job that really exists looks like a missing endpoint.
+
+    Ingestion runs in a background thread and the UI polls for it, so job state
+    has to outlive the process that created it. Held in memory it broke as soon
+    as the polling request reached a different process -- `uvicorn --reload`
+    restarting when the ingest writes its cache, or `--workers N` giving each
+    worker its own dict.
+    """
+    from app import config
+    from app.main import Job, _load_job, _save_job
+
+    monkeypatch.setattr(config, "DB_PATH", tmp_path / "jobs.db")
+
+    _save_job(Job(id="abc123", filename="x.pdf", status="running"))
+
+    # A fresh read, as a different process would do it.
+    loaded = _load_job("abc123")
+    assert loaded is not None
+    assert loaded.status == "running"
+    assert loaded.filename == "x.pdf"
+
+    _save_job(Job(id="abc123", filename="x.pdf", status="done", report={"n_stored": 7}))
+    reloaded = _load_job("abc123")
+    assert reloaded is not None
+    assert reloaded.status == "done"
+    assert reloaded.report["n_stored"] == 7
+
+    assert _load_job("never-existed") is None

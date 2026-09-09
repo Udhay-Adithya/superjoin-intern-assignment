@@ -152,3 +152,19 @@ CREATE TABLE IF NOT EXISTS failures (
 );
 
 CREATE INDEX IF NOT EXISTS idx_failures_stage ON failures(stage);
+
+-- Upload jobs. Ingestion takes minutes, so an upload returns a job id that the
+-- UI polls. Keeping that state in memory looked fine until the process that
+-- created a job was not the one answering the poll -- uvicorn --reload
+-- restarting mid-ingest, or --workers giving each worker its own memory. Both
+-- produced a 404 on a job that genuinely existed. Storage is shared; memory
+-- is not.
+CREATE TABLE IF NOT EXISTS jobs (
+    id          TEXT PRIMARY KEY,
+    filename    TEXT NOT NULL,
+    status      TEXT NOT NULL,          -- queued | running | done | failed
+    detail      TEXT NOT NULL DEFAULT '',
+    report_json TEXT NOT NULL DEFAULT '{}',
+    created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
+);
