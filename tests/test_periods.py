@@ -145,3 +145,39 @@ def test_non_consecutive_spans_are_rejected() -> None:
     rollover = parse_period("1999-00")
     assert rollover is not None
     assert rollover.end == date(2000, 3, 31)
+
+
+@pytest.mark.parametrize(
+    ("label", "start", "end"),
+    [
+        ("September 2024", date(2024, 9, 1), date(2024, 9, 30)),
+        ("end of January 2024", date(2024, 1, 1), date(2024, 1, 31)),
+        ("March 2025", date(2025, 3, 1), date(2025, 3, 31)),
+    ],
+)
+def test_a_month_is_a_month_not_a_year(label: str, start: date, end: date) -> None:
+    """Found by the engine reporting a false contradiction.
+
+    The IMF reports FX reserves for "September 2024" and the Economic Survey for
+    "end of January 2024". With no month pattern both collapsed onto calendar
+    year 2024, so two figures about different months were compared as if they
+    described the same period.
+    """
+    p = parse_period(label)
+    assert p is not None, label
+    assert (p.start, p.end) == (start, end)
+
+
+def test_a_day_first_date_is_still_an_instant() -> None:
+    """"as on 3 January 2025" -- day before month, as Indian sources write it."""
+    p = parse_period("as on 3 January 2025")
+    assert p is not None
+    assert p.start == p.end == date(2025, 1, 3)
+
+
+def test_different_months_do_not_share_a_period() -> None:
+    september = parse_period("September 2024")
+    january = parse_period("end of January 2024")
+    assert september is not None and january is not None
+    assert september.key != january.key
+    assert not september.overlaps(january)

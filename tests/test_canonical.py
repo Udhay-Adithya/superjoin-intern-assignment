@@ -190,6 +190,8 @@ def test_metric_shaped_subject_falls_back_to_the_document_entity(conn) -> None:
         # a determiner means the tail is a period, not a qualifier
         ("Loss for the year", "loss for the year", None),
         ("Profit for the period", "profit for the period", None),
+        # a two-word tail is still a qualifier
+        ("revenue from traded goods", "revenue", "traded goods"),
         # nothing to split
         ("Total Income", "total income", None),
         ("Other income", "other income", None),
@@ -211,3 +213,25 @@ def test_the_annual_report_and_the_deck_reach_the_same_metric() -> None:
 
     assert annual_head == deck_head, "the two must share a metric to be compared"
     assert annual_tail != deck_tail, "but the variant must still tell them apart"
+
+
+def test_a_long_tail_is_description_not_a_qualifier() -> None:
+    """Found by the engine reporting three false contradictions.
+
+    The prospectus cash-flow statement lists several kinds of proceeds. Taking
+    only the first word after "from" reduced "proceeds from sale of financial
+    assets" and "proceeds from sale of investment in equity" to the same
+    metric and the same "sale" variant, so the system reported a cash-flow
+    statement as contradicting itself.
+    """
+    assets = split_metric_variant("Proceeds from sale of financial assets - liquid mutual fund units")
+    equity = split_metric_variant("Proceeds from sale of investment in equity")
+
+    assert assets[1] is None and equity[1] is None, "a long tail must not become a variant"
+    assert assets[0] != equity[0], "these are different line items and must not collapse"
+
+
+def test_column_markers_do_not_block_a_split() -> None:
+    """"(A+B)" is table notation, not part of what is counted."""
+    assert split_metric_variant("Revenue from customers (A+B)") == ("revenue", "customers")
+    assert split_metric_variant("Revenue for services (A)") == ("revenue", "services")

@@ -230,3 +230,37 @@ def test_anaphora_resolves_to_the_document_subject(conn, report_path) -> None:
     assert names, "no entity was created"
     assert any("delhivery" in n for n in names), names
     assert not any(n in {"your company", "the company"} for n in names), names
+
+
+def test_more_pages_of_an_ingested_document_can_be_added(conn, report_path) -> None:
+    """Deepening coverage of a document already stored.
+
+    Re-uploading the same PDF must not duplicate it, but reading *further pages*
+    of it is a real thing to want. The first version refused both, so a second
+    range of an already-ingested report was silently skipped.
+    """
+    first = _ingest(conn, report_path, StubClient(), pages=(20, 24))
+    assert not first.already_ingested
+    assert first.n_stored > 0
+
+    second = _ingest(conn, report_path, StubClient(), pages=(25, 30))
+    assert not second.already_ingested, "new pages should be read, not skipped"
+    assert second.doc_id == first.doc_id, "and must attach to the same document"
+
+    documents = conn.execute("SELECT COUNT(*) AS n FROM documents").fetchone()
+    assert documents["n"] == 1, "the document must not be duplicated"
+
+    # Pages read in the first pass are not read again.
+    pages_seen = {
+        r["page_no"]
+        for r in conn.execute("SELECT DISTINCT page_no FROM blocks WHERE doc_id = ?",
+                              (first.doc_id,))
+    }
+    assert pages_seen & set(range(20, 25)), "first range recorded"
+    assert not any(p > 30 for p in pages_seen), "nothing outside the requested ranges"
+
+
+def test_repeating_an_already_read_range_is_still_a_no_op(conn, report_path) -> None:
+    _ingest(conn, report_path, StubClient(), pages=(20, 24))
+    again = _ingest(conn, report_path, StubClient(), pages=(20, 24))
+    assert again.already_ingested

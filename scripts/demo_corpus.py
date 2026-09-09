@@ -61,6 +61,40 @@ PLAN: list[tuple[Path, tuple[int, int], str]] = [
         (20, 22),
         "Economic Survey estimate of the same figure",
     ),
+    # --- widening the overlap -------------------------------------------
+    # The ranges above are enough to demonstrate the four cases, but they leave
+    # the knowledge layer thin: only three fact clusters spanned more than one
+    # document, and a contradiction needs two sources making the same claim
+    # differently. These ranges exist to give the comparison engine something
+    # to actually disagree about.
+    (
+        DATASETS / "delhivery/01-delhivery-prospectus-2022-excerpt.pdf",
+        (16, 28),
+        (
+            "the third Delhivery document: FY20-FY22 financials, and the proforma "
+            "restatements where one year's revenue is reported twice at different values"
+        ),
+    ),
+    (
+        DATASETS / "delhivery/03-delhivery-q4-fy24-earnings-presentation.pdf",
+        (19, 24),
+        "further deck tables, for more overlap with the annual report",
+    ),
+    (
+        DATASETS / "india-macroeconomy/02-rbi-annual-report-2024-25-excerpt.pdf",
+        (8, 12),
+        "RBI assessment and prospects: FY2024-25 outturns as well as forecasts",
+    ),
+    (
+        DATASETS / "india-macroeconomy/03-imf-india-2025-article-iv-excerpt.pdf",
+        (63, 68),
+        "IMF statistical tables: the same macro series, a different vintage",
+    ),
+    (
+        DATASETS / "india-macroeconomy/01-india-economic-survey-2024-25-excerpt.pdf",
+        (27, 31),
+        "Economic Survey inflation series, overlapping RBI and IMF",
+    ),
 ]
 
 

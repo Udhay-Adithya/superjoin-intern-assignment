@@ -99,30 +99,51 @@ _VARIANT_SEPARATORS = (" from ", " for ")
 _TAIL_STOPWORDS = frozenset({"the", "a", "an", "this", "that", "these", "those", "each"})
 
 
+# A tail longer than this is a description, not a qualifier, and splitting it
+# throws away the words that tell two line items apart.
+_MAX_VARIANT_WORDS = 2
+
+
+def _clean_tail(tail: str) -> list[str]:
+    """Drop single-letter tokens left behind by column markers.
+
+    "customers (A+B)" normalizes to "customers a b"; the "a" and "b" are table
+    notation, not part of what is being counted.
+    """
+    return [word for word in tail.split() if len(word) > 1]
+
+
 def split_metric_variant(metric: str) -> tuple[str, str | None]:
-    """Separate a measure from the tail that says what it counts.
+    """Separate a measure from the short tail that says what it counts.
 
     "revenue from operations" becomes ("revenue", "operations") and "revenue
     from customers" becomes ("revenue", "customers"). Both then share a metric,
     so they land in the same cluster and can be compared -- while the differing
-    variant keeps them from being treated as interchangeable.
+    variant keeps them from being treated as interchangeable. Leaving the tail
+    inside the metric was why the annual report's "revenue from operations"
+    never met the earnings deck's "revenue from customers", even though both
+    report the same 8,142 crore for FY24.
 
-    Leaving the tail inside the metric was why the annual report's
-    "revenue from operations" never met the earnings deck's "revenue from
-    customers", even though both report the same 8,142 crore for FY24.
+    A long tail is left alone. "Proceeds from sale of financial assets" and
+    "proceeds from sale of investment in equity" are different line items, and
+    reducing both to a "sale" variant of "proceeds" reported them as a
+    contradiction -- the system claiming a cash-flow statement disagreed with
+    itself.
     """
     lowered = normalize_phrase(metric)
     for separator in _VARIANT_SEPARATORS:
-        if separator in lowered:
-            head, tail = lowered.split(separator, 1)
-            head, tail = head.strip(), tail.strip()
-            # Only the leading word of the tail: "customers (A+B)" and
-            # "customers" must reduce to the same variant.
-            if head and tail:
-                first = tail.split(" ")[0]
-                if first in _TAIL_STOPWORDS:
-                    return lowered, None
-                return head, first
+        if separator not in lowered:
+            continue
+        head, tail = (part.strip() for part in lowered.split(separator, 1))
+        if not head or not tail:
+            continue
+        words = _clean_tail(tail)
+        if not words or words[0] in _TAIL_STOPWORDS:
+            return lowered, None
+        if len(words) > _MAX_VARIANT_WORDS:
+            # Too much meaning in the tail to discard it.
+            return lowered, None
+        return head, " ".join(words)
     return lowered, None
 
 

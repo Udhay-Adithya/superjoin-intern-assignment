@@ -44,6 +44,11 @@ export interface Relation {
   delta: number | null;
   explanation: string;
   qualifier_inferred: number;
+  adjudicated: number;
+  adjudicator_agrees: number | null;
+  adjudicator_note: string | null;
+  missing_context: string | null;
+  confidence: number;
   a: Fact | null;
   b: Fact | null;
 }

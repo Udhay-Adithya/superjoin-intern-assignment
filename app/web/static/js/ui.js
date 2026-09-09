@@ -42,6 +42,25 @@ function factCard(fact) {
       </div>
     </div>`;
 }
+/** The reviewing model's opinion, which never overrides the rule.
+ *
+ * A disagreement is shown, not resolved: it means either a qualifier the
+ * extractor missed or a rule the engine lacks, and hiding it loses that signal.
+ */
+function reviewBlock(relation) {
+    if (!relation.adjudicated || !relation.adjudicator_note)
+        return "";
+    const agrees = relation.adjudicator_agrees === 1;
+    return `
+    <div class="review ${agrees ? "agrees" : "disagrees"}">
+      <span class="review-tag">${agrees ? "reviewer agrees" : "reviewer disagrees"}</span>
+      <span class="review-conf">confidence ${relation.confidence.toFixed(2)}</span>
+      <p>${escapeHtml(relation.adjudicator_note)}</p>
+      ${relation.missing_context
+        ? `<p class="review-missing">missing: ${escapeHtml(relation.missing_context)}</p>`
+        : ""}
+    </div>`;
+}
 function relationCard(relation) {
     const inferred = relation.qualifier_inferred
         ? '<span class="badge-inferred" title="a qualifier was missing and treated as a match">inferred qualifier</span>'
@@ -55,6 +74,7 @@ function relationCard(relation) {
       </header>
       <p class="explanation">${escapeHtml(relation.explanation)}</p>
       <div class="pair">${factCard(relation.a)}${factCard(relation.b)}</div>
+      ${reviewBlock(relation)}
     </article>`;
 }
 // --- views -----------------------------------------------------------------

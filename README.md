@@ -324,7 +324,8 @@ corpus rely on a convention that is assumed rather than read — `2024-25` is on
 fiscal year because Indian institutions write it that way. Every such fact is
 flagged `inferred`.
 
-**Metric resolution is too coarse, and it is the main source of error.** Two real
+**Metric resolution is too coarse, and it is the main source of error among
+facts that are extracted at all.** Two real
 cases from a live run, both now caught as label collisions rather than reported
 as contradictions:
 
@@ -349,6 +350,21 @@ than the publisher. This matters: `source_tier` is derived from document type,
 so a misread type mis-ranks a source when two facts conflict. A stricter
 approach would read the publisher from the cover page alone, or verify it
 against the document's own header and footer.
+
+**Charts, graphs and images are invisible to the system.** These documents carry
+real facts in pictures — the Economic Survey and the RBI report in particular
+put growth and inflation series in charts whose numbers appear nowhere in the
+text layer. Everything extracted here comes from text, so those facts are simply
+missed, and the system does not know it is missing them.
+
+The fix is a vision pass: render pages that contain figures, send the image to a
+vision-language model, and extract the plotted values with the same claim-frame
+schema and the same grounding rules, with the chart's bounding box standing in
+for a character span as the evidence. That would also cover scanned PDFs for
+free. It is not done here because image input costs many times more tokens per
+page than text, and this project runs on a free tier capped at 200,000 tokens a
+day — the text pipeline alone already exceeds that on the full corpus. It is the
+single largest source of missed facts and the first thing I would build next.
 
 **No OCR path.** Every starter PDF has a clean text layer. A scanned PDF yields
 close to nothing; the fix is a VLM fallback when the text layer is empty.

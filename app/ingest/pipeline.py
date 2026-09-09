@@ -103,15 +103,46 @@ def ingest_document(
     workers = workers if workers is not None else config.LLM_WORKERS
     parsed = parse_pdf(path)
 
+    # A document is identified by its content, so re-uploading the same PDF does
+    # not duplicate it. But a second pass over *different pages* of a document
+    # already stored is a real thing to want -- it is how you deepen coverage of
+    # a report you have only partly read -- so that is allowed, and only the
+    # pages already extracted are skipped.
     existing = conn.execute(
         "SELECT id FROM documents WHERE sha256 = ?", (parsed.sha256,)
     ).fetchone()
+
     if existing is not None:
-        return IngestReport(
-            doc_id=int(existing["id"]),
-            filename=path.name,
-            already_ingested=True,
-            n_pages=parsed.n_pages,
+        doc_id = int(existing["id"])
+        # Pages we stored blocks for are pages we have already read. Using
+        # pages that produced *facts* would re-read every page that legitimately
+        # contained none, forever.
+        done = {
+            int(row["page_no"])
+            for row in conn.execute(
+                "SELECT DISTINCT page_no FROM blocks WHERE doc_id = ?", (doc_id,)
+            )
+        }
+        wanted = set(range(pages[0], pages[1] + 1)) if pages else set(
+            range(1, parsed.n_pages + 1)
+        )
+        if not wanted - done:
+            return IngestReport(
+                doc_id=doc_id,
+                filename=path.name,
+                already_ingested=True,
+                n_pages=parsed.n_pages,
+            )
+        return _extend_document(
+            parsed,
+            doc_id=doc_id,
+            skip_pages=done,
+            conn=conn,
+            client=client,
+            extract_model=extract_model,
+            workers=workers,
+            max_regions=max_regions,
+            pages=pages,
         )
 
     metadata = extract_metadata(
@@ -147,11 +178,92 @@ def ingest_document(
             char_end=page.char_end,
         )
 
+    _process_regions(
+        parsed,
+        report=report,
+        doc_id=doc_id,
+        conn=conn,
+        client=client,
+        extract_model=extract_model,
+        default_entity=metadata.primary_entity,
+        workers=workers,
+        max_regions=max_regions,
+        pages=pages,
+        skip_pages=frozenset(),
+    )
+    return report
+
+
+def _extend_document(
+    parsed: ParsedDoc,
+    *,
+    doc_id: int,
+    skip_pages: set[int],
+    conn: sqlite3.Connection,
+    client: LLMClient,
+    extract_model: str,
+    workers: int,
+    max_regions: int | None,
+    pages: tuple[int, int] | None,
+) -> IngestReport:
+    """Extract further pages of a document already in the knowledge layer.
+
+    The document row, its pages and its metadata are already stored, so only the
+    new regions are extracted. Pages that have already produced facts are
+    skipped rather than re-read.
+    """
+    row = conn.execute(
+        "SELECT filename, n_pages, title, publisher FROM documents WHERE id = ?", (doc_id,)
+    ).fetchone()
+    report = IngestReport(
+        doc_id=doc_id, filename=row["filename"], n_pages=int(row["n_pages"] or 0)
+    )
+    _process_regions(
+        parsed,
+        report=report,
+        doc_id=doc_id,
+        conn=conn,
+        client=client,
+        extract_model=extract_model,
+        default_entity=row["publisher"] or row["title"] or "",
+        workers=workers,
+        max_regions=max_regions,
+        pages=pages,
+        skip_pages=frozenset(skip_pages),
+    )
+    return report
+
+
+def _process_regions(
+    parsed: ParsedDoc,
+    *,
+    report: IngestReport,
+    doc_id: int,
+    conn: sqlite3.Connection,
+    client: LLMClient,
+    extract_model: str,
+    default_entity: str,
+    workers: int,
+    max_regions: int | None,
+    pages: tuple[int, int] | None,
+    skip_pages: frozenset[int],
+) -> None:
+    """Segment, extract, ground, normalize and store one document's regions."""
     regions = segment_document(parsed.pages)
     report.n_regions = len(regions)
 
+    def in_scope(region: Region) -> bool:
+        if region.page_no in skip_pages:
+            return False
+        return pages is None or pages[0] <= region.page_no <= pages[1]
+
+    # Only the pages this pass reads are stored. That keeps `blocks` an honest
+    # record of what has been processed, which is what a later pass consults to
+    # know where to resume.
     block_ids: dict[int, int] = {}
     for ordinal, region in enumerate(regions):
+        if not in_scope(region):
+            continue
         block_ids[ordinal] = db.insert(
             conn,
             "blocks",
@@ -165,10 +277,7 @@ def ingest_document(
             ordinal=ordinal,
         )
 
-    targets = [(i, r) for i, r in enumerate(regions) if _fact_bearing(r)]
-    if pages is not None:
-        first, last = pages
-        targets = [(i, r) for i, r in targets if first <= r.page_no <= last]
+    targets = [(i, r) for i, r in enumerate(regions) if in_scope(r) and _fact_bearing(r)]
     if max_regions is not None:
         targets = targets[:max_regions]
     report.n_regions_extracted = len(targets)
@@ -205,7 +314,7 @@ def ingest_document(
         for candidate in result.facts:
             try:
                 normalized = normalize_candidate(
-                    candidate, conn=conn, default_entity=metadata.primary_entity
+                    candidate, conn=conn, default_entity=default_entity
                 )
             except NormalizationError as exc:
                 report.note(exc.reason)
@@ -263,7 +372,6 @@ def ingest_document(
     conn.commit()
     report.n_relations = reconcile_keys(conn, touched_core_keys)
     conn.commit()
-    return report
 
 
 # --- reconciliation --------------------------------------------------------

@@ -37,6 +37,7 @@ KIND_FISCAL_HALF = "fiscal_half"
 KIND_CALENDAR_YEAR = "calendar_year"
 KIND_CALENDAR_QUARTER = "calendar_quarter"
 KIND_INSTANT = "instant"
+KIND_MONTH = "month"
 
 
 @dataclass(frozen=True)
@@ -141,6 +142,12 @@ _PATTERNS: list[tuple[re.Pattern[str], str]] = [
     (re.compile(r"\b(\d{4})\s*[-/]\s*(\d{2})\b"), "bare_fiscal_span"),
     # March 31, 2024
     (re.compile(r"\b(\w+)\s+(\d{1,2}),?\s+(\d{4})\b"), "instant"),
+    # 3 January 2025 -- day before month, as the Economic Survey writes it
+    (re.compile(r"\b(\d{1,2})\s+(\w+),?\s+(\d{4})\b"), "instant_day_first"),
+    # September 2024 -- a month, not a year. Without this the month is lost and
+    # every month of 2024 collapses onto the calendar year, so figures from
+    # different months are compared as though they described the same period.
+    (re.compile(r"\b(\w+)\s+(\d{4})\b"), "month"),
     # bare 2025
     (re.compile(r"\b(\d{4})\b"), "calendar_year"),
 ]
@@ -246,6 +253,23 @@ def _build(kind: str, m: re.Match[str], raw: str) -> Period | None:
         except ValueError:
             return None
         return Period(point, point, KIND_INSTANT, raw)
+
+    if kind == "instant_day_first":
+        month = MONTHS.get(m.group(2).lower())
+        if month is None:
+            return None
+        try:
+            point = date(int(m.group(3)), month, int(m.group(1)))
+        except ValueError:
+            return None
+        return Period(point, point, KIND_INSTANT, raw)
+
+    if kind == "month":
+        month = MONTHS.get(m.group(1).lower())
+        if month is None:
+            return None
+        year = int(m.group(2))
+        return Period(date(year, month, 1), _end_of_month(year, month), KIND_MONTH, raw)
 
     if kind == "calendar_year":
         year = int(m.group(1))
