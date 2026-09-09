@@ -129,6 +129,43 @@ The reviewer model agreed, at 0.97 confidence:
 > IMF at 6.6%. The evidence shows they are forecasts, not actuals, and the small
 > numeric difference is typical of differing projections, not a logical conflict.*
 
+### 2b. A genuine contradiction — and a reviewer who disagrees
+
+```
+A  International Monetary Fund (2025-11-26) · p12
+   $706 billion    actual    period "September 2024" -> 2024-09-01 .. 2024-09-30
+   "foreign exchange (FX) reserves declined to $668 billion in March 2025,
+    from $706 billion in September 2024..."
+
+B  Economic Survey 2024-25 · p31
+   704.9 USD billion  actual  period "September 2024" -> 2024-09-01 .. 2024-09-30
+   "USD 616.7 billion at the end of January 2024 to USD 704.9 billion in
+    September 2024"
+
+→ IMF reports $706 billion USD but the other source reports 704.9 USD for the
+  same entity, metric, period and basis. They differ by 1.1e+09, beyond the
+  1e+09 their notation allows.
+```
+
+Two institutions, the same month, the same measure, both reporting an outturn
+rather than a forecast — and figures that differ by more than their own notation
+can absorb.
+
+The reviewing model was then asked to check it, and **disagreed**:
+
+> *"Both sources report actual foreign exchange reserves for September 2024, with
+> IMF stating $706 billion and RBI stating $704.9 billion. The evidence shows no
+> difference in scope, basis, or definition... The 1.1 billion gap is within
+> typical rounding or reporting variance and does not constitute a substantive
+> conflict."* — 0.87 confidence
+
+That disagreement is **recorded, not obeyed.** The rule's verdict stands and the
+reviewer's dissent is shown next to it, because a gap between the two means
+either a qualifier the extractor missed or a rule the engine lacks — and
+resolving it silently would destroy the signal. Reasonable people could take
+either side here, which is exactly why the system shows both rather than
+pretending to certainty.
+
 ### 3. An apparent contradiction explained by context
 
 ```
@@ -407,21 +444,22 @@ like `2017-23`, table line-wrap artifacts) with no false rejections.
 
 | | |
 |---|---|
-| Documents / pages | 5 / 411 |
-| Facts extracted | 351 |
-| Relations found | 55 |
-| Grounding rejection rate | **0.56%** |
-| Rebuild from cache | 3s |
-| Tests | 138 |
+| Documents / pages | 6 / 511 (the whole starter set) |
+| Facts extracted | 842 |
+| Relations found | 147 |
+| Grounding rejection rate | **0.35%** |
+| Rebuild from cache | 6s |
+| Tests | 148 |
 
 Verdict breakdown:
 
 ```
-corroborates  agrees_despite_differing_qualifiers  17
+reconciled    metric_label_collision               50
+reconciled    different_variant                    40
+corroborates  agrees_despite_differing_qualifiers  30
 reconciled    different_basis                      14
-reconciled    different_variant                    12
-reconciled    metric_label_collision                7
-corroborates  within_implied_precision              4
+corroborates  within_implied_precision             11
+contradicts   value_mismatch                        1
 reconciled    differing_forecast                    1
 ```
 
