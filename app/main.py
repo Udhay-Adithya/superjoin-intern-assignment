@@ -179,7 +179,10 @@ async def upload_document(file: UploadFile) -> dict:
     job = Job(id=uuid.uuid4().hex[:12], filename=file.filename)
     _save_job(job)
     threading.Thread(target=_run_ingest, args=(job, destination), daemon=True).start()
-    return {"job_id": job.id, "filename": job.filename, "status": job.status}
+    # The same shape as GET /api/jobs/{id}. Returning a differently-named field
+    # here (`job_id`) than the one the client reads back (`id`) meant the client
+    # polled /api/jobs/undefined and got a 404 that looked like a missing route.
+    return asdict(job)
 
 
 def _run_ingest(job: Job, path: Path) -> None:

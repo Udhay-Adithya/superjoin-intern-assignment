@@ -298,3 +298,40 @@ def test_upload_job_state_survives_a_restart(tmp_path, monkeypatch) -> None:
     assert reloaded.report["n_stored"] == 7
 
     assert _load_job("never-existed") is None
+
+
+def test_upload_returns_the_id_the_client_polls_with(tmp_path, monkeypatch) -> None:
+    """The contract between the two job endpoints, which silently drifted apart.
+
+    POST /api/documents returned `job_id` while the client read `id` and polled
+    /api/jobs/undefined. That answers 404, which reads like a missing route
+    rather than a naming mismatch, and it made the upload button fail for every
+    user while the API itself tested fine with curl.
+    """
+    from fastapi.testclient import TestClient
+
+    from app import config
+    from app.main import app
+
+    monkeypatch.setattr(config, "DB_PATH", tmp_path / "api.db")
+    monkeypatch.setattr(config, "UPLOAD_DIR", tmp_path / "uploads")
+    monkeypatch.setattr(config, "LLM_API_KEY", "")
+
+    pdf = ANNUAL_REPORT
+    if not pdf.exists():
+        pytest.skip("starter dataset not present")
+
+    with TestClient(app) as client:
+        with pdf.open("rb") as fh:
+            created = client.post(
+                "/api/documents", files={"file": ("x.pdf", fh, "application/pdf")}
+            )
+        assert created.status_code == 200
+        body = created.json()
+
+        assert "id" in body, "the client polls body.id; without it the id is undefined"
+        assert body["id"], "the id must not be empty"
+
+        polled = client.get(f"/api/jobs/{body['id']}")
+        assert polled.status_code == 200, "the id returned must be pollable"
+        assert set(body) == set(polled.json()), "both endpoints must return one shape"
