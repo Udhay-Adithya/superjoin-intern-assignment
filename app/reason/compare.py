@@ -8,10 +8,16 @@ their own notation implies. That is why the annual report's 81,415.38 million
 and the earnings deck's 8,142 crore corroborate: they differ by 4.6 million
 rupees, which is less than the half-crore the coarser figure was rounded to.
 
-Contradiction is reserved for claims that purport to describe the same settled
-fact. Two institutions forecasting different growth rates for a year that has
-not happened yet are not contradicting each other -- they disagree, which is a
-different thing, and the system says so rather than picking a winner.
+Contradiction is reserved for claims that purport to *observe* the same thing.
+A forecast does not observe anything: it is a claim made under uncertainty,
+using a particular method, at a particular moment. Two institutions publishing
+different forecasts are disagreeing, not contradicting each other, and that
+stays true after the period closes -- the documents still say what they
+predicted, and a prediction is not made wrong by another prediction.
+
+What a closed period does make possible is checking a forecast against the
+outturn. That is a different comparison, between a projection and an actual,
+and the ``modality`` field keeps the two apart.
 """
 
 from __future__ import annotations
@@ -247,8 +253,9 @@ def compare(a: ComparableFact, b: ComparableFact) -> Relation | None:
             delta=delta, tolerance=tolerance, qualifier_inferred=inferred,
         )
 
-    # A forecast of an unsettled future is an opinion, not a claim about a fact
-    # that can be checked. Two of them differing is disagreement, not error.
+    # Two forecasts of the same period are competing predictions, not competing
+    # observations. Neither is evidence against the other, whether or not the
+    # period has since closed.
     if a.modality == "projected" and b.modality == "projected":
         return Relation(
             a.id, b.id, RECONCILED, "differing_forecast",

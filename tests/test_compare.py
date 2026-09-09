@@ -133,8 +133,10 @@ def test_case_three_variant_difference_is_also_reconciled() -> None:
 def test_case_two_competing_forecasts_are_not_contradictions() -> None:
     """RBI 6.5% vs IMF 6.6% for FY2025-26.
 
-    Neither is wrong: the year has not happened. The system reports disagreement
-    and names the sources rather than picking a winner.
+    Neither observes anything: both are predictions, made by different methods
+    at different times. The system reports disagreement and names the sources
+    rather than picking a winner. This holds after the period closes too -- the
+    documents still record what each institution predicted.
     """
     rbi = make(
         1, "6.5", "per cent", metric="real gdp growth", entity="india", period=FY26,
@@ -155,7 +157,7 @@ def test_case_two_competing_forecasts_are_not_contradictions() -> None:
 
 
 def test_conflicting_actuals_do_contradict() -> None:
-    """The same claim about a settled past is a real contradiction."""
+    """Two *observations* of the same period that disagree is a real contradiction."""
     survey = make(
         1, "6.4", "per cent", metric="real gdp growth", entity="india", period=FY24,
         modality="actual", publisher="Economic Survey",

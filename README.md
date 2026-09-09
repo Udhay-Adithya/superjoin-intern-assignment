@@ -102,34 +102,7 @@ normalized, the fiscal periods resolve to the same interval, and the qualifying
 tail (`operations` / `customers`) is lifted out of the metric into `variant` so
 both reduce to one measure.
 
-### 2. A genuine disagreement
-
-```
-A  Reserve Bank of India · p17
-   6.5 per cent    modality=projected   period=2025-26
-   "real GDP growth for 2025-26 is projected at 6.5 per cent, with risks"
-
-B  International Monetary Fund (2025-11-26) · p13
-   6.6 percent     modality=projected   period=FY2025/26
-   "real GDP growth is projected at 6.6 percent in FY2025/26, helped by the
-    strong 2025Q2 growth outturn, the GST reform..."
-
-→ Competing forecasts, not a contradiction: Reserve Bank of India projects 6.5 %
-  and International Monetary Fund (2025-11-26) projects 6.6 percent for the same
-  period. Forecasts differ by method and vintage.
-```
-
-Note what the system refuses to do: it does not pick a winner. Neither
-institution is wrong, because the year has not happened. `2025-26` and
-`FY2025/26` are recognised as the same interval despite different notation.
-
-The reviewer model agreed, at 0.97 confidence:
-
-> *Both sources quote projected real GDP growth for FY2025/26: RBI at 6.5% and
-> IMF at 6.6%. The evidence shows they are forecasts, not actuals, and the small
-> numeric difference is typical of differing projections, not a logical conflict.*
-
-### 2b. A genuine contradiction — and a reviewer who disagrees
+### 2. A genuine contradiction — and a reviewer who disagrees
 
 ```
 A  International Monetary Fund (2025-11-26) · p12
@@ -147,9 +120,16 @@ B  Economic Survey 2024-25 · p31
   1e+09 their notation allows.
 ```
 
-Two institutions, the same month, the same measure, both reporting an outturn
-rather than a forecast — and figures that differ by more than their own notation
-can absorb.
+Two institutions, the same month, the same measure, and both reporting an
+outturn rather than a projection — so they are describing something that
+actually happened, and their figures do not match by more than their own
+notation can absorb.
+
+Getting here needed two other things to work first. `September 2024` has to be
+read as a *month*: without that the label collapses onto calendar year 2024, and
+figures from different months get compared as though they described the same
+period. And the two facts have to survive the grounding gate, so the numbers
+being compared are demonstrably the ones printed on the page.
 
 The reviewing model was then asked to check it, and **disagreed**:
 
@@ -160,11 +140,11 @@ The reviewing model was then asked to check it, and **disagreed**:
 > conflict."* — 0.87 confidence
 
 That disagreement is **recorded, not obeyed.** The rule's verdict stands and the
-reviewer's dissent is shown next to it, because a gap between the two means
+reviewer's dissent is shown beside it, because a gap between the two means
 either a qualifier the extractor missed or a rule the engine lacks — and
 resolving it silently would destroy the signal. Reasonable people could take
-either side here, which is exactly why the system shows both rather than
-pretending to certainty.
+either side here, which is why the system shows both rather than pretending to
+certainty.
 
 ### 3. An apparent contradiction explained by context
 
@@ -190,6 +170,33 @@ B  4,660,337 Preference Shares of ₹100 each   variant=100
 
 → Not a contradiction: these measure different things.
 ```
+
+And a third, resolved by what *kind* of claim each one is:
+
+```
+A  Reserve Bank of India · p17
+   6.5 per cent    modality=projected   period "2025-26"
+
+B  International Monetary Fund (2025-11-26) · p13
+   6.6 percent     modality=projected   period "FY2025/26"
+
+→ Competing forecasts, not a contradiction: Reserve Bank of India projects 6.5 %
+  and International Monetary Fund projects 6.6 percent for the same period.
+  Forecasts differ by method and vintage.
+```
+
+Two different notations, `2025-26` and `FY2025/26`, resolve to the same interval.
+But the values are *predictions*, not observations — made by different methods,
+six months apart — so neither is evidence against the other. That remains true
+now the period has closed: the documents still record what each institution
+predicted, and a prediction is not made wrong by another prediction. Checking a
+forecast against the eventual outturn is a different comparison, between a
+projection and an actual, which `modality` keeps separate.
+
+The reviewer agreed here, at 0.97 confidence:
+
+> *"The evidence shows they are forecasts, not actuals, and the small numeric
+> difference is typical of differing projections, not a logical conflict."*
 
 ### 4. An extraction failure, and how it is handled
 
@@ -302,11 +309,18 @@ was implemented first and quietly failed: 6.5% and 6.6% both touch 6.55, so any
 two adjacent one-decimal percentages "agreed", erasing the difference between two
 institutions' published forecasts.
 
-### Contradiction is reserved for settled facts
+### Contradiction is reserved for observations
 
-Two institutions forecasting different growth for a year that has not happened
-are not contradicting each other. Competing projections are `reconciled` with
-both publishers and vintages named; only conflicting *actuals* contradict.
+A forecast does not observe anything: it is a claim made under uncertainty, by a
+particular method, at a particular moment. Two institutions publishing different
+forecasts are disagreeing, not contradicting each other, and that stays true
+after the period closes — a prediction is not made wrong by another prediction.
+Competing projections are therefore `reconciled` with both publishers and
+vintages named; only conflicting *actuals* contradict.
+
+Comparing a forecast against the eventual outturn is a different and useful
+comparison. `modality` keeps the two apart so it can be made deliberately rather
+than by accident.
 
 ### What this system will not claim
 
